@@ -158,3 +158,23 @@ setup() {
   run bash -c "NO_CACHE=1 AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"$fn_dir"$'\n'"$fn_get"$'\n'"ai_cache_get '$IN'"
   [ "$status" -ne 0 ]  # nothing returned when bypassed
 }
+
+@test "--context accepts auto" {
+  run bash "$SQUISH" "$IN" --ai --context auto --no-color
+  # With no key this becomes local mode, but the validation must not reject 'auto'.
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--context must be one of"* ]]
+}
+
+@test "ai_schema includes a context field when CONTEXT is auto" {
+  fn="$(sed -n '/^ai_schema() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "CONTEXT=auto AI_FIELDS=name,alt,params,html; $fn"$'\n'"ai_schema")"
+  printf '%s' "$out" | jq -e '.properties.context' >/dev/null
+}
+
+@test "ai_schema omits context field when CONTEXT is explicit" {
+  fn="$(sed -n '/^ai_schema() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "CONTEXT=web AI_FIELDS=name,alt,params,html; $fn"$'\n'"ai_schema")"
+  run bash -c "printf '%s' '$out' | jq -e '.properties.context'"
+  [ "$status" -ne 0 ]  # no context property
+}

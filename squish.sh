@@ -76,7 +76,7 @@ RENAME=""             # replace the base name entirely
 AI=0                  # run vision analysis
 AI_LOCAL=0            # --ai requested but no key -> local heuristic mode
 APPLY=0               # apply the AI-suggested name automatically
-CONTEXT="general"     # general | email-signature | web | hero | icon | avatar
+CONTEXT=""            # general | email-signature | web | hero | icon | avatar | auto (resolved after arg parsing)
 AI_FIELDS="name,alt,params,html"
 AI_PROVIDER="auto"    # auto | anthropic | openai
 AI_MODEL=""           # empty = provider default (haiku / gpt-4o-mini)
@@ -153,7 +153,13 @@ case "$NAME_AS" in optimized|plain|slug|retina|width) ;; *) die "--name-as must 
 if [[ "$NAME_AS" == "width" || "$NAME_AS" == "retina" ]] && (( WIDTH == 0 )); then
   die "--name-as $NAME_AS needs a resize (--width or --retina --display)"
 fi
-case "$CONTEXT" in general|email-signature|web|hero|icon|avatar) ;; *) die "--context must be one of: general, email-signature, web, hero, icon, avatar" ;; esac
+
+# Default context: 'auto' under --ai (let the model infer), else 'general'.
+if [[ -z "$CONTEXT" ]]; then
+  if (( AI )); then CONTEXT="auto"; else CONTEXT="general"; fi
+fi
+
+case "$CONTEXT" in auto|general|email-signature|web|hero|icon|avatar) ;; *) die "--context must be one of: auto, general, email-signature, web, hero, icon, avatar" ;; esac
 (( APPLY )) && [[ ${#INPUTS[@]} -gt 1 ]] && die "--apply can't be used with multiple inputs (each name would collide)"
 
 # --- deps ---------------------------------------------------------------------
@@ -404,6 +410,10 @@ ai_schema() {
   for f in "${_f[@]}"; do case "$(printf '%s' "$f" | tr -d '[:space:]')" in
     name) want_name=1 ;; alt) want_alt=1 ;; params) want_params=1 ;; html) want_html=1 ;;
   esac; done
+  if [[ "$CONTEXT" == "auto" ]]; then
+    props+='"context":{"type":"string","enum":["general","email-signature","web","hero","icon","avatar"],"description":"the inferred purpose of this image"},'
+    req+='"context",'
+  fi
   (( want_name )) && { props+='"name":{"type":"string","description":"url-safe kebab-case slug describing the image content, no extension"},'; req+='"name",'; }
   (( want_alt )) &&  { props+='"alt":{"type":"string","description":"concise alt text for accessibility"},'; req+='"alt",'; }
   (( want_params )) && { props+='"kind":{"type":"string","enum":["photo","logo","illustration","gradient","icon","screenshot","other"],"description":"photo=camera photograph of real subjects; logo=brand mark, often flat colors; illustration=drawn/vector artwork; gradient=smooth color blends, 3D renders, glossy/metallic surfaces, abstract backgrounds; icon=tiny UI glyph; screenshot=UI capture. A metallic or glossy 3D render is gradient, NOT photo."},"suggested_colors":{"type":"integer","enum":[32,64,128,256],"description":"palette size: 256 for photos and smooth gradients (avoid banding); 128 for most illustrations/renders; 64 for flat logos; 32 for simple icons"},"suggest_webp":{"type":"boolean","description":"true if the image has smooth gradients or many colors where WebP saves meaningful bytes"},'; req+='"kind","suggested_colors","suggest_webp",'; }
@@ -416,6 +426,7 @@ ai_prompt() {
   printf 'You are analyzing an image to help optimize and label it. %s' "$(context_hint)"
   [[ -n "$dims" ]] && printf ' The file is %s px (width x height) — but the HTML width attribute must be a DISPLAY size per the context note, not these file dimensions.' "$dims"
   printf ' Rules: (1) name = url-safe kebab-case slug describing the visible content (lowercase, hyphens, no spaces, no accents, no file extension); prefer 2-4 descriptive words. (2) Classify kind by what the surface actually looks like: a glossy, metallic, or 3D-rendered surface with smooth color blends is "gradient", never "photo"; "photo" is only a real-world camera photograph. (3) alt = concise, describes the image for a screen reader. Return only the requested fields.'
+  [[ "$CONTEXT" == "auto" ]] && printf ' First infer what this image is for (avatar, hero banner, small icon, email-signature accent, or general web image) and set the "context" field; then calibrate name/alt/html to that inferred context.'
 }
 
 # --- Anthropic backend: base64 image block + output_config.format (json_schema).
@@ -662,7 +673,12 @@ optimize_one() {
         "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')" \
         "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_avif then " --avif" else "" end')"
     else
-      printf '   %s🧠 AI%s %s(%s · %s)%s\n' "$CYAN" "$RESET" "$DIM" "$AI_MODEL" "$CONTEXT" "$RESET"
+      local ctx_disp="$CONTEXT"
+      if [[ "$CONTEXT" == "auto" ]]; then
+        local inferred; inferred="$(printf '%s' "$AI_JSON" | jq -r '.context // empty')"
+        [[ -n "$inferred" ]] && ctx_disp="auto→$inferred"
+      fi
+      printf '   %s🧠 AI%s %s(%s · %s)%s\n' "$CYAN" "$RESET" "$DIM" "$AI_MODEL" "$ctx_disp" "$RESET"
       local v
       v="$(printf '%s' "$AI_JSON" | jq -r '.name   // empty')"; [[ -n "$v" ]] && printf '      %sname%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$v"
       printf '%s' "$RESET"

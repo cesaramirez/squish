@@ -345,19 +345,29 @@ analyze_local() {
     kind="icon"
   elif (( colors > 0 && colors <= 16 )); then
     kind="logo"
-  elif (( colors >= 256 )); then
+  elif (( colors >= 4096 )); then
     # Many distinct colors. Smooth blends (gradients/renders) vs photos: use a
     # cheap edge-density proxy. Photos have high edge energy; gradients low.
     local edges
-    edges="$(magick "${src}[0]" -colorspace Gray -edge 1 -format '%[fx:mean]' info: 2>/dev/null || echo 0)"
+    edges="$(magick "${src}[0]" -colorspace Gray -edge 1 /tmp/edge_temp_$$.png 2>/dev/null && magick identify -format '%[fx:mean]' /tmp/edge_temp_$$.png 2>/dev/null ; rm -f /tmp/edge_temp_$$.png)"
+    [[ -z "$edges" || ! "$edges" =~ ^-?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$ ]] && edges="0"
     # mean edge magnitude in [0,1]; photos ~>0.06, smooth gradients ~<0.03.
-    if [[ "$edges" =~ ^0?\.[0-9]+$|^[01]$ ]] && awk "BEGIN{exit !($edges < 0.05)}"; then
+    if awk "BEGIN{exit !($edges < 0.015)}"; then
       kind="gradient"
     else
       kind="photo"
     fi
   else
-    kind="illustration"
+    # 16 < colors < 4096: illustrations, logos with anti-aliasing, or gradients.
+    # Use edge-density to distinguish smooth blends from textured/detailed images.
+    local edges
+    edges="$(magick "${src}[0]" -colorspace Gray -edge 1 /tmp/edge_temp_$$.png 2>/dev/null && magick identify -format '%[fx:mean]' /tmp/edge_temp_$$.png 2>/dev/null ; rm -f /tmp/edge_temp_$$.png)"
+    [[ -z "$edges" || ! "$edges" =~ ^-?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$ ]] && edges="0"
+    if awk "BEGIN{exit !($edges < 0.015)}"; then
+      kind="gradient"
+    else
+      kind="illustration"
+    fi
   fi
 
   local sc webp avif

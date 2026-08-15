@@ -94,6 +94,7 @@ INPUTS=()
 RC_LOADED=0           # set to 1 when a ./.squishrc was read
 RECURSIVE=0           # -R / --recursive: descend into directory inputs
 declare -A WALK_ROOT=()   # discovered-file -> the directory input it came from
+WATCH=0               # --watch: optimize, then poll sources and re-optimize on change
 
 # --- colors -------------------------------------------------------------------
 # Honor NO_COLOR, --no-color, and non-TTY output (pipes, CI) automatically.
@@ -204,6 +205,7 @@ while [[ $# -gt 0 ]]; do
         --ai-model) AI_MODEL="${2:?}"; shift 2 ;;
         --ai-provider) AI_PROVIDER="${2:?}"; shift 2 ;;
         --no-cache) NO_CACHE=1; shift ;;
+        --watch)   WATCH=1; shift ;;
         --no-color) NO_COLOR=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
     -h|--help)     NO_COLOR=1; usage; exit 0 ;;
@@ -268,6 +270,7 @@ expand_inputs
 if [[ "$NAME_AS" == "width" || "$NAME_AS" == "retina" ]] && (( WIDTH == 0 )); then
   die "--name-as $NAME_AS needs a resize (--width or --retina --display)"
 fi
+(( WATCH )) && (( DRY_RUN )) && die "--watch can't be combined with --dry-run"
 
 # Default context: 'auto' under --ai (let the model infer), else 'general'.
 if [[ -z "$CONTEXT" ]]; then
@@ -346,6 +349,16 @@ fi
 # Cross-platform file size in bytes (BSD/macOS `stat -f%z` vs GNU/Linux `stat -c%s`).
 filesize() {
   stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+}
+
+# file_stamp FILE -> "mtime:size" for change detection, or "" if the file is gone.
+file_stamp() {
+  local f="$1"
+  [[ -f "$f" ]] || { printf ''; return; }
+  local mt sz
+  mt="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
+  sz="$(filesize "$f")"
+  printf '%s:%s' "$mt" "$sz"
 }
 
 # Cross-platform sha256 of a file's bytes (macOS shasum vs Linux sha256sum).
@@ -953,6 +966,37 @@ run_pipeline_once() {
              # become the function's exit status (would trip `set -e` at the call).
 }
 
-run_pipeline_once
-# Exit 0 if at least one file was optimized; 1 only if everything failed.
-(( OK_COUNT > 0 )) && exit 0 || exit 1
+# Watch loop: first pass, then poll sources (mtime+size) and re-optimize changes.
+# Snapshot covers only sources (INPUTS), never outputs, so squish's own writes
+# never re-trigger. Ctrl-C / SIGTERM stops cleanly.
+run_watch() {
+  local -a ORIG_INPUTS=("${INPUTS[@]}")   # what the user asked to watch
+  declare -A STAMP
+  run_pipeline_once                        # first pass: optimize everything
+  local f
+  for f in "${INPUTS[@]}"; do STAMP["$f"]="$(file_stamp "$f")"; done
+  note "${DIM}watching ${#INPUTS[@]} source(s) — Ctrl-C to stop${RESET}"
+  trap 'note ""; note "${GREEN}✓${RESET} stopped watching"; exit 0' INT TERM
+
+  while true; do
+    sleep "${WATCH_INTERVAL:-2}"
+    INPUTS=("${ORIG_INPUTS[@]}")            # reset before re-discovery
+    expand_inputs                          # re-discover (new files, recursive)
+    local changed=() cur
+    for f in "${INPUTS[@]}"; do
+      cur="$(file_stamp "$f")"
+      if [[ "$cur" != "${STAMP[$f]:-}" ]]; then changed+=("$f"); STAMP["$f"]="$cur"; fi
+    done
+    (( ${#changed[@]} )) || continue
+    INPUTS=("${changed[@]}")
+    run_pipeline_once
+  done
+}
+
+if (( WATCH )); then
+  run_watch
+else
+  run_pipeline_once
+  # Exit 0 if at least one file was optimized; 1 only if everything failed.
+  (( OK_COUNT > 0 )) && exit 0 || exit 1
+fi

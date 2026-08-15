@@ -25,6 +25,23 @@ setup() {
   [[ "$output" == *"Usage"* || "$output" == *"--help"* ]]
 }
 
+@test "--help documents the v0.3-v0.5 features (--recursive, --watch, .squishrc)" {
+  run bash "$SQUISH" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--recursive"* ]]
+  [[ "$output" == *"--watch"* ]]
+  [[ "$output" == *".squishrc"* ]]
+}
+
+@test "--version and -V print a version and exit 0" {
+  run bash "$SQUISH" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == squish\ [0-9]*.[0-9]*.[0-9]* ]]
+  run bash "$SQUISH" -V
+  [ "$status" -eq 0 ]
+  [[ "$output" == squish\ [0-9]*.[0-9]*.[0-9]* ]]
+}
+
 @test "optimizing a PNG writes a smaller output file that exists" {
   out="$BATS_TEST_TMPDIR/out.png"
   # Assert on the written file, not $status: the compress step runs before the

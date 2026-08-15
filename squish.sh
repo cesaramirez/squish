@@ -53,8 +53,22 @@
 #       --ai-model M   Model override (default: gpt-4o-mini / claude-haiku-4-5).
 #       --no-cache     Bypass the AI result cache (~/.cache/squish/).
 #
+#   Directories & watching:
+#   -R, --recursive    Descend into directory inputs; optimize every image found
+#                      (png/jpg/jpeg). Skips hidden dirs, never follows symlinks.
+#                      With --out-dir, the source tree is mirrored into the target.
+#       --watch        Optimize once, then re-optimize sources as they change
+#                      (polls every 2s; picks up new files with -R). Ctrl-C stops.
+#
+#   Project config:
+#       A ./.squishrc (key=value) sets per-project default flags. Precedence:
+#       CLI flags > .squishrc > built-in defaults. Keys: colors, width, webp,
+#       avif, jpeg_quality, name_as, out_dir, ai, context, ai_provider, ai_model,
+#       ai_fields, no_cache, quiet, no_color.
+#
 #       --no-color     Disable colored output (also respects NO_COLOR env var).
 #   -q, --quiet        Only print the per-file result lines.
+#   -V, --version      Print the version and exit.
 #   -h, --help         Show this help.
 #
 # Requires: pngquant, oxipng. Optional: sips (macOS) or imagemagick (resize, JPEG,
@@ -67,6 +81,8 @@ if (( BASH_VERSINFO[0] < 4 )); then
   printf 'squish requires bash 4 or newer (found %s). On macOS: brew install bash.\n' "${BASH_VERSION}" >&2
   exit 1
 fi
+
+VERSION="0.5.1"      # bump on each release; printed by --version
 
 COLORS=128
 WIDTH=0
@@ -209,6 +225,7 @@ while [[ $# -gt 0 ]]; do
         --watch)   WATCH=1; shift ;;
         --no-color) NO_COLOR=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
+    -V|--version)  printf 'squish %s\n' "$VERSION"; exit 0 ;;
     -h|--help)     NO_COLOR=1; usage; exit 0 ;;
     -*)            NO_COLOR=1; die "unknown option: $1" ;;
     *)             INPUTS+=("$1"); shift ;;

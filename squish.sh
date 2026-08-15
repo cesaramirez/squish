@@ -484,7 +484,7 @@ ai_cache_get() {
   local key file
   key="$(ai_cache_key "$1")" || return 1
   file="$(ai_cache_dir)/${key}.json"
-  [[ -f "$file" ]] || return 1
+  [[ -s "$file" ]] || return 1
   cat "$file"
 }
 

@@ -332,6 +332,18 @@ context_hint() {
 # Order of checks matters: icon (by size) before gradient/photo (by colors).
 analyze_local() {
   local src="$1" w h colors kind
+
+  # Helper: compute mean edge magnitude in [0,1]; low = smooth (gradient), high = detailed.
+  edge_density() {
+    local img="$1" tmp mean
+    tmp="$(mktemp -t squish-edge.XXXXXX.png)" || tmp="/tmp/squish-edge-$$-$RANDOM.png"
+    if magick "${img}[0]" -colorspace Gray -edge 1 "$tmp" 2>/dev/null; then
+      mean="$(magick identify -format '%[fx:mean]' "$tmp" 2>/dev/null)"
+    fi
+    rm -f "$tmp"
+    [[ "$mean" =~ ^-?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$ ]] || mean="0"
+    printf '%s' "$mean"
+  }
   # Dimensions and unique color count. %k can be large; keep it an integer.
   w="$(magick identify -format '%w' "${src}[0]" 2>/dev/null || echo 0)"
   h="$(magick identify -format '%h' "${src}[0]" 2>/dev/null || echo 0)"
@@ -349,9 +361,8 @@ analyze_local() {
     # Many distinct colors. Smooth blends (gradients/renders) vs photos: use a
     # cheap edge-density proxy. Photos have high edge energy; gradients low.
     local edges
-    edges="$(magick "${src}[0]" -colorspace Gray -edge 1 /tmp/edge_temp_$$.png 2>/dev/null && magick identify -format '%[fx:mean]' /tmp/edge_temp_$$.png 2>/dev/null ; rm -f /tmp/edge_temp_$$.png)"
-    [[ -z "$edges" || ! "$edges" =~ ^-?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$ ]] && edges="0"
-    # mean edge magnitude in [0,1]; photos ~>0.06, smooth gradients ~<0.03.
+    edges="$(edge_density "$src")"
+    # mean edge magnitude in [0,1]; gradients measure < 0.015, detailed images above.
     if awk "BEGIN{exit !($edges < 0.015)}"; then
       kind="gradient"
     else
@@ -361,8 +372,8 @@ analyze_local() {
     # 16 < colors < 4096: illustrations, logos with anti-aliasing, or gradients.
     # Use edge-density to distinguish smooth blends from textured/detailed images.
     local edges
-    edges="$(magick "${src}[0]" -colorspace Gray -edge 1 /tmp/edge_temp_$$.png 2>/dev/null && magick identify -format '%[fx:mean]' /tmp/edge_temp_$$.png 2>/dev/null ; rm -f /tmp/edge_temp_$$.png)"
-    [[ -z "$edges" || ! "$edges" =~ ^-?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$ ]] && edges="0"
+    edges="$(edge_density "$src")"
+    # mean edge magnitude in [0,1]; gradients measure < 0.015, detailed images above.
     if awk "BEGIN{exit !($edges < 0.015)}"; then
       kind="gradient"
     else

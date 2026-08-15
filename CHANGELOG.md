@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-15
+
 ### Added
 
 - Recursive traversal: pass a directory with `-R`/`--recursive` to optimize every
@@ -76,7 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vision-AI analysis via `--ai` (OpenAI and Anthropic) suggesting a semantic
   filename, alt text, optimal parameters, and a ready-to-paste HTML snippet.
 
-[Unreleased]: https://github.com/cesaramirez/squish/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/cesaramirez/squish/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/cesaramirez/squish/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cesaramirez/squish/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cesaramirez/squish/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cesaramirez/squish/compare/v0.1.0...v0.2.0

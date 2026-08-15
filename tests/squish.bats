@@ -246,3 +246,80 @@ setup() {
   [[ "$output" == *"32c"* ]]
   [[ "$output" != *"64c"* ]]
 }
+
+@test "squishrc: webp=1 emits a .webp sibling without --webp" {
+  command -v cwebp >/dev/null || command -v magick >/dev/null || skip "needs a webp encoder"
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf 'webp=1\n' > .squishrc
+  out="$BATS_TEST_TMPDIR/o.png"
+  run bash "$SQUISH" in.png --output "$out" --no-color
+  [ -f "${out%.png}.webp" ] || [ -f "$BATS_TEST_TMPDIR/in.webp" ] || [ -f "$out.webp" ]
+}
+
+@test "squishrc: unknown key warns on stderr and run still succeeds" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf 'wbep=1\n' > .squishrc
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unknown key 'wbep'"* ]]
+}
+
+@test "squishrc: invalid value is ignored and the default stands" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf 'colors=abc\n' > .squishrc
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [[ "$output" == *"invalid colors 'abc'"* ]]
+  [[ "$output" == *"128c"* ]]   # built-in default, since abc was rejected
+}
+
+@test "squishrc: a non key=value junk line is ignored, never executed" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  # If the file were sourced, this would delete the marker. It must not run.
+  printf 'rm -f should-survive\n' > .squishrc
+  : > should-survive
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [ -f should-survive ]
+  [[ "$output" == *"not key=value"* ]]
+}
+
+@test "squishrc: comments and blank lines are ignored without warnings" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf '# a comment\n\ncolors=64  # inline comment\n' > .squishrc
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [[ "$output" == *"64c"* ]]
+  [[ "$output" != *"⚠"* ]]
+}
+
+@test "squishrc: absent file behaves exactly like today" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  [ ! -e .squishrc ]
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"128c"* ]]   # untouched default
+}
+
+@test "squishrc: ai=1 enables analysis but does not apply/rename" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf 'ai=1\n' > .squishrc
+  out="$BATS_TEST_TMPDIR/o.png"
+  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" in.png --output "$out" --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"auto (local)"* ]]   # AI path ran (local, no key)
+  [ -f "$out" ]                          # wrote to the explicit --output, no AI rename
+}

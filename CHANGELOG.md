@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Recursive traversal: pass a directory with `-R`/`--recursive` to optimize every
+  supported image inside it (any depth). Skips hidden dirs and non-images, never
+  follows symlinks. With `--out-dir`, the source tree is mirrored into the target.
+
 ## [0.4.0] - 2026-08-15
 
 ### Added

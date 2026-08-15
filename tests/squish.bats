@@ -202,7 +202,7 @@ setup() {
   fn_stem="$(sed -n '/^build_stem() {/,/^}/p' "$SQUISH")"
   fn_dest="$(sed -n '/^dest_for() {/,/^}/p' "$SQUISH")"
   out="$(bash -c '
-    declare -A TAKEN; OUTPUT="" OUT_DIR="'"$od"'" NAME_AS=slug WIDTH=0
+    declare -A TAKEN WALK_ROOT; OUTPUT="" OUT_DIR="'"$od"'" NAME_AS=slug WIDTH=0
     '"$fn_slug"$'\n'"$fn_kind"$'\n'"$fn_ext"$'\n'"$fn_stem"$'\n'"$fn_dest"$'
     for src in "'"$in"'/a.png" "'"$in"'/b.png"; do
       RENAME="" dst="$(dest_for "$src")"; TAKEN[$dst]=1        # pre-rename claim (run loop)
@@ -335,4 +335,134 @@ setup() {
   printf 'colors=64\n' > .squishrc
   run bash "$SQUISH" in.png --dry-run --no-color
   [[ "$output" == *".squishrc"* ]]
+}
+
+@test "recursive: -R processes images in nested subdirectories" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root/ui"
+  magick -size 40x40 xc:red "$root/logo.png"
+  magick -size 40x40 xc:blue "$root/ui/icon.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"logo"* ]]
+  [[ "$output" == *"icon"* ]]
+}
+
+@test "recursive: a directory input without -R is an error" {
+  d="$BATS_TEST_TMPDIR/adir"; mkdir -p "$d"
+  run bash "$SQUISH" "$d" --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"use -R"* ]]
+}
+
+@test "recursive: -R skips non-image files silently" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/mix"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/pic.png"
+  printf 'hello' > "$root/notes.txt"
+  printf '<svg/>' > "$root/vector.svg"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pic"* ]]
+  [[ "$output" != *"notes"* ]]
+  [[ "$output" != *"vector"* ]]
+}
+
+@test "recursive: -R skips hidden directories" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/proj"; mkdir -p "$root/.git" "$root/pub"
+  magick -size 40x40 xc:red "$root/.git/secret.png"
+  magick -size 40x40 xc:blue "$root/pub/shown.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"shown"* ]]
+  [[ "$output" != *"secret"* ]]
+}
+
+@test "recursive: a hidden ancestor in the passed path does not exclude everything" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  # The walk root lives UNDER a hidden directory the user explicitly passed.
+  root="$BATS_TEST_TMPDIR/.config/icons"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/app.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"app"* ]]      # the file IS found despite the hidden ancestor
+}
+
+@test "recursive: still skips hidden SUBdirectories below the walk root" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/proj2"; mkdir -p "$root/.git" "$root/pub"
+  magick -size 40x40 xc:red "$root/.git/secret.png"
+  magick -size 40x40 xc:blue "$root/pub/shown.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"shown"* ]]
+  [[ "$output" != *"secret"* ]]
+}
+
+@test "recursive: -R over a directory with no images errors clearly" {
+  d="$BATS_TEST_TMPDIR/empty"; mkdir -p "$d"
+  printf 'x' > "$d/readme.md"
+  run bash "$SQUISH" "$d" -R --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no images"* ]]
+}
+
+@test "recursive: handles spaces in subdirectory and file names" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/my assets"; mkdir -p "$root/sub dir"
+  magick -size 40x40 xc:red "$root/sub dir/cool pic.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cool pic"* || "$output" == *"cool-pic"* ]]
+}
+
+@test "recursive: non-regression — loose file input unaffected without -R" {
+  out="$BATS_TEST_TMPDIR/o.png"
+  run bash "$SQUISH" "$IN" --output "$out" --no-color
+  [ -f "$out" ]
+}
+
+@test "recursive: -R with --output errors (multiple inputs)" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/two"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/a.png"; magick -size 40x40 xc:blue "$root/b.png"
+  run bash "$SQUISH" "$root" -R --output "$BATS_TEST_TMPDIR/x.png" --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can't be used with multiple inputs"* ]]
+}
+
+@test "recursive: -R with --out-dir mirrors the source tree" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root/ui"
+  magick -size 40x40 xc:red  "$root/logo.png"
+  magick -size 40x40 xc:blue "$root/ui/icon.png"
+  dist="$BATS_TEST_TMPDIR/dist"
+  run bash "$SQUISH" "$root" -R --out-dir "$dist" --no-color
+  [ "$status" -eq 0 ]
+  # top-level file lands at dist root; nested file mirrors its subdir.
+  [ -f "$dist/logo.png" ]
+  [ -f "$dist/ui/icon.png" ]
+}
+
+@test "recursive: -R --out-dir --dry-run writes nothing to disk" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root/ui"
+  magick -size 40x40 xc:red "$root/logo.png"
+  magick -size 40x40 xc:blue "$root/ui/icon.png"
+  dist="$BATS_TEST_TMPDIR/dist"
+  run bash "$SQUISH" "$root" -R --out-dir "$dist" --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [ ! -e "$dist" ]        # no output tree created at all
+}
+
+@test "recursive: a loose file under --out-dir still flattens (not mirrored)" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  sub="$BATS_TEST_TMPDIR/deep/nested"; mkdir -p "$sub"
+  magick -size 40x40 xc:red "$sub/pic.png"
+  dist="$BATS_TEST_TMPDIR/out"
+  # Passed as a direct file (no -R): no walk root, so it flattens to dist/pic.png.
+  run bash "$SQUISH" "$sub/pic.png" --out-dir "$dist" --no-color
+  [ "$status" -eq 0 ]
+  [ -f "$dist/pic.png" ]
 }

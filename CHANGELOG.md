@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.1] - 2026-08-15
 
+### Added
+
+- `--version` / `-V` prints the version and exits.
+
 ### Fixed
+
+- `--help` now documents the flags added since v0.2 (`-R`/`--recursive`,
+  `--watch`, and `.squishrc` project config).
 
 - Compression failures are now reported as failures instead of false success:
   if a tool can't write the output (e.g. optimizing a JPEG without ImageMagick),

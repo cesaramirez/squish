@@ -7,15 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `--apply` batch collisions: when the AI suggests the same name for two images,
-  the second no longer silently overwrites the first — it gets a numeric suffix.
-- Local `--ai` (no key) now requires ImageMagick and warns instead of silently
-  misclassifying every image when `magick` is absent (e.g. sips-only macOS).
-- AI cache key now includes the provider, so switching providers with the same
-  model name no longer returns a stale cross-provider result.
-
 ## [0.3.0] - 2026-08-15
 
 ### Added
@@ -24,6 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic context inference via `--context auto` (the default under `--ai`) — the model infers whether the image is an avatar, hero, icon, web image, email signature, or general.
 - AI result caching by content hash (stored in `~/.cache/squish/`); `--no-cache` to bypass.
 - `--apply` now works on batches; colliding output names get numeric suffixes (`name.png`, `name-2.png`, etc.).
+
+### Fixed
+
+- `--apply` batch collisions: when the AI suggests the same name for two images,
+  the second no longer silently overwrites the first — it gets a numeric suffix.
+- Local `--ai` (no key) now requires ImageMagick and warns instead of silently
+  misclassifying every image when `magick` is absent (e.g. sips-only macOS).
+- AI cache key now includes the provider, so switching providers with the same
+  model name no longer returns a stale cross-provider result.
 
 ## [0.2.0] - 2026-08-15
 

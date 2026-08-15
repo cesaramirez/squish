@@ -379,6 +379,27 @@ setup() {
   [[ "$output" != *"secret"* ]]
 }
 
+@test "recursive: a hidden ancestor in the passed path does not exclude everything" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  # The walk root lives UNDER a hidden directory the user explicitly passed.
+  root="$BATS_TEST_TMPDIR/.config/icons"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/app.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"app"* ]]      # the file IS found despite the hidden ancestor
+}
+
+@test "recursive: still skips hidden SUBdirectories below the walk root" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/proj2"; mkdir -p "$root/.git" "$root/pub"
+  magick -size 40x40 xc:red "$root/.git/secret.png"
+  magick -size 40x40 xc:blue "$root/pub/shown.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"shown"* ]]
+  [[ "$output" != *"secret"* ]]
+}
+
 @test "recursive: -R over a directory with no images errors clearly" {
   d="$BATS_TEST_TMPDIR/empty"; mkdir -p "$d"
   printf 'x' > "$d/readme.md"
@@ -422,6 +443,17 @@ setup() {
   # top-level file lands at dist root; nested file mirrors its subdir.
   [ -f "$dist/logo.png" ]
   [ -f "$dist/ui/icon.png" ]
+}
+
+@test "recursive: -R --out-dir --dry-run writes nothing to disk" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root/ui"
+  magick -size 40x40 xc:red "$root/logo.png"
+  magick -size 40x40 xc:blue "$root/ui/icon.png"
+  dist="$BATS_TEST_TMPDIR/dist"
+  run bash "$SQUISH" "$root" -R --out-dir "$dist" --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [ ! -e "$dist" ]        # no output tree created at all
 }
 
 @test "recursive: a loose file under --out-dir still flattens (not mirrored)" {

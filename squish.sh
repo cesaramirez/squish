@@ -218,10 +218,10 @@ setup_colors
 # sorted, deterministic. POSIX find (BSD+GNU): files only (no symlink follow),
 # case-insensitive extension match, skips any hidden path component.
 discover_images() {
-  local dir="$1"
+  local dir="${1%/}"
   find "$dir" -type f \( \
       -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \
-    \) -not -path '*/.*' -print0 | sort -z
+    \) -not -path "$dir/.*" -not -path "$dir/*/.*" -print0 | sort -z
 }
 
 # expand_inputs: replace each directory in INPUTS with the images found inside
@@ -340,7 +340,7 @@ if (( AI )); then
   fi
 fi
 
-[[ -n "$OUT_DIR" ]] && mkdir -p "$OUT_DIR"
+[[ -n "$OUT_DIR" ]] && (( ! DRY_RUN )) && mkdir -p "$OUT_DIR"
 
 # --- helpers ------------------------------------------------------------------
 # Cross-platform file size in bytes (BSD/macOS `stat -f%z` vs GNU/Linux `stat -c%s`).
@@ -876,7 +876,7 @@ dest_for() {
       rel="${src#"$root"/}"                 # path relative to the walk root
       reldir="$(dirname "$rel")"
       if [[ "$reldir" == "." ]]; then dir="$OUT_DIR"; else dir="$OUT_DIR/$reldir"; fi
-      mkdir -p "$dir"
+      (( DRY_RUN )) || mkdir -p "$dir"
     else
       dir="$OUT_DIR"                         # loose file: flatten (existing behavior)
     fi

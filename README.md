@@ -151,6 +151,22 @@ squish assets/ -R --out-dir dist/
 
 (`-r` remains `--retina`; the recursive short flag is the capital `-R`.)
 
+### Watch (`--watch`)
+
+Keep squish running and it re-optimizes sources as you edit them:
+
+```bash
+squish assets/ --watch -R
+```
+
+It optimizes everything once, then polls the sources every 2 seconds and
+re-optimizes any that change — or any new image you drop into a watched
+directory (with `-R`). Only sources are watched; the files squish generates
+(`-min`, `.webp`, `.avif`) never re-trigger it. Press Ctrl-C to stop.
+
+`--watch` can't be combined with `--dry-run`. With `--ai`, note that each change
+re-queries the model, so an API key means per-edit API calls.
+
 ### Project config (`.squishrc`)
 
 Drop a `.squishrc` in a project directory to persist default flags, so you don't

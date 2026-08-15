@@ -1,6 +1,6 @@
 # squish
 
-[![CI](https://github.com/cesaramirez/squish/actions/workflows/ci.yml/badge.svg)](https://github.com/cesaramirez/squish/actions/workflows/ci.yml)
+[![CI](https://github.com/heycesar/squish/actions/workflows/ci.yml/badge.svg)](https://github.com/heycesar/squish/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Shell](https://img.shields.io/badge/shell-bash-121011.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
@@ -28,7 +28,7 @@ does both, keeps the file email/web-safe, and gives it a clean URL-safe name.
 One-liner (copies `squish` to a bin dir on your `PATH` and checks deps):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/cesaramirez/squish/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/heycesar/squish/main/install.sh | bash
 ```
 
 Or do it by hand. Requires **pngquant** and **oxipng**; optional tools unlock
@@ -317,7 +317,7 @@ Real example: a 1016 KB / 1154px asset → **40 KB** at `-w 400` (−96%).
 Optimize images automatically in pull requests:
 
 ```yaml
-- uses: cesaramirez/squish@v0.2.0
+- uses: heycesar/squish@v0.2.0
   with:
     files: "assets/**/*.png"
     webp: "true"
@@ -328,7 +328,7 @@ See [docs/USING_THE_ACTION.md](docs/USING_THE_ACTION.md) for a full workflow.
 ## Install via Homebrew
 
 ```bash
-brew install cesaramirez/tap/squish
+brew install heycesar/tap/squish
 ```
 
 See [docs/HOMEBREW.md](docs/HOMEBREW.md) for tap setup.

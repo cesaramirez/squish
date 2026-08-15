@@ -6,7 +6,7 @@ low-ceremony: clone, edit `squish.sh`, run the checks, open a PR.
 ## Local setup
 
 ```bash
-git clone https://github.com/cesaramirez/squish.git
+git clone https://github.com/heycesar/squish.git
 cd squish
 chmod +x squish.sh
 ln -sf "$(pwd)/squish.sh" /opt/homebrew/bin/squish   # macOS (Apple Silicon)

@@ -2,14 +2,14 @@
 #
 # install.sh — installer for squish.
 #
-#   curl -fsSL https://raw.githubusercontent.com/cesaramirez/squish/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/heycesar/squish/main/install.sh | bash
 #
 # Copies squish.sh to a bin dir on your PATH and checks dependencies.
 # Override the target with:  PREFIX=~/.local/bin bash install.sh
 
 set -euo pipefail
 
-REPO_RAW="https://raw.githubusercontent.com/cesaramirez/squish/main/squish.sh"
+REPO_RAW="https://raw.githubusercontent.com/heycesar/squish/main/squish.sh"
 
 bold=$'\033[1m'; green=$'\033[32m'; yellow=$'\033[33m'; red=$'\033[31m'; reset=$'\033[0m'
 say()  { printf '%s\n' "$*"; }

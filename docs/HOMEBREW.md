@@ -7,14 +7,14 @@
 Install in one line:
 
 ```sh
-brew install cesaramirez/tap/squish
+brew install heycesar/tap/squish
 ```
 
-That shorthand implicitly taps `cesaramirez/homebrew-tap` and installs the
+That shorthand implicitly taps `heycesar/homebrew-tap` and installs the
 `squish` formula from it. If you prefer the explicit two-step form:
 
 ```sh
-brew tap cesaramirez/tap
+brew tap heycesar/tap
 brew install squish
 ```
 
@@ -31,22 +31,22 @@ Homebrew pulls in the required optimizers automatically (`pngquant`,
 `webp` and `jq` are optional. To install without the recommended extras:
 
 ```sh
-brew install --without-imagemagick cesaramirez/tap/squish
+brew install --without-imagemagick heycesar/tap/squish
 ```
 
 ## For the maintainer (César)
 
 The live formula lives in a **separate public repo** named `homebrew-tap`
-under the `cesaramirez` account. Homebrew requires the repo to be named
-`homebrew-<tap>`, so `cesaramirez/tap` resolves to
-`github.com/cesaramirez/homebrew-tap`.
+under the `heycesar` account. Homebrew requires the repo to be named
+`homebrew-<tap>`, so `heycesar/tap` resolves to
+`github.com/heycesar/homebrew-tap`.
 
 ### 1. Create the tap repo
 
-Create a public repo `cesaramirez/homebrew-tap` on GitHub (empty), then:
+Create a public repo `heycesar/homebrew-tap` on GitHub (empty), then:
 
 ```sh
-git clone https://github.com/cesaramirez/homebrew-tap.git
+git clone https://github.com/heycesar/homebrew-tap.git
 cd homebrew-tap
 mkdir -p Formula
 ```
@@ -58,7 +58,7 @@ Copy `Formula/squish.rb` from this repo into the tap, then compute the real
 placeholder:
 
 ```sh
-curl -sL https://github.com/cesaramirez/squish/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
+curl -sL https://github.com/heycesar/squish/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256
 ```
 
 Paste the resulting hash into the `sha256 "..."` line of `Formula/squish.rb`.
@@ -74,9 +74,9 @@ git push origin main
 ### 4. Verify
 
 ```sh
-brew install cesaramirez/tap/squish
+brew install heycesar/tap/squish
 brew test squish
-brew audit --strict --online cesaramirez/tap/squish
+brew audit --strict --online heycesar/tap/squish
 ```
 
 ### Releasing a new version
@@ -90,5 +90,5 @@ brew audit --strict --online cesaramirez/tap/squish
 
 The `Formula/squish.rb` in **this** repo (`squish`) is a template / source of
 truth kept alongside the code. The formula Homebrew actually installs from is
-the copy in the `cesaramirez/homebrew-tap` repo. When you change the template
+the copy in the `heycesar/homebrew-tap` repo. When you change the template
 here, mirror the change into the tap repo (and vice versa).

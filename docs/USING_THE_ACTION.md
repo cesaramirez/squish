@@ -2,7 +2,7 @@
 
 `squish` ships a reusable **composite GitHub Action** so you can optimize images
 (resize + compress, with optional WebP/AVIF output) directly in your CI. Point a
-workflow at `cesaramirez/squish@v0.2.0` and it will install the needed tools on
+workflow at `heycesar/squish@v0.2.0` and it will install the needed tools on
 the runner (`pngquant`, `imagemagick`, `webp`, `oxipng`) and run squish over the
 images you select.
 
@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Optimize images
-        uses: cesaramirez/squish@v0.2.0
+        uses: heycesar/squish@v0.2.0
         with:
           files: "assets/**/*.png"
           webp: "true"
@@ -58,7 +58,7 @@ On every PR that touches `assets/**/*.png`, this:
 
 ```yaml
       - name: Optimize hero images
-        uses: cesaramirez/squish@v0.2.0
+        uses: heycesar/squish@v0.2.0
         with:
           files: "assets/heroes/**/*.png"
           width: "1200"
@@ -72,7 +72,7 @@ Anything squish accepts can be forwarded via `args`:
 
 ```yaml
       - name: Optimize with a custom output dir
-        uses: cesaramirez/squish@v0.2.0
+        uses: heycesar/squish@v0.2.0
         with:
           files: "src/img/**/*.png"
           args: "--out-dir dist"

@@ -71,12 +71,16 @@ setup() {
   [[ "$output" == *"unknown option"* ]]
 }
 
-@test "--ai with no key warns and still optimizes" {
-  out="$BATS_TEST_TMPDIR/ai.png"
-  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" "$IN" --ai --output "$out"
-  # Degrades gracefully: warns about the missing key but still writes the file.
+@test "--ai with no key runs local analysis and still optimizes" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  out="$BATS_TEST_TMPDIR/o.png"
+  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" "$IN" --ai --output "$out" --no-color
+  [ "$status" -eq 0 ]
   [ -f "$out" ]
-  [[ "$output" == *"API key"* || "$stderr" == *"API key"* || "$output" == *"⚠"* ]]
+  # Local block header must appear instead of the old "skipping" warning.
+  [[ "$output" == *"auto (local)"* ]]
+  [[ "$output" != *"Skipping AI analysis"* ]]
 }
 
 @test "sha256 helper: same bytes give same digest, different bytes differ" {

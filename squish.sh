@@ -74,6 +74,7 @@ OUTPUT=""
 NAME_AS="slug"        # slug | optimized | plain | retina | width  (default: slug, URL-safe)
 RENAME=""             # replace the base name entirely
 AI=0                  # run vision analysis
+AI_LOCAL=0            # --ai requested but no key -> local heuristic mode
 APPLY=0               # apply the AI-suggested name automatically
 CONTEXT="general"     # general | email-signature | web | hero | icon | avatar
 AI_FIELDS="name,alt,params,html"
@@ -202,9 +203,8 @@ if (( AI )); then
       none)      AI_KEY="" ;;
     esac
     if [[ -z "$AI_KEY" ]]; then
-      printf '%s⚠%s --ai needs an API key: set %sOPENAI_API_KEY%s or %sANTHROPIC_API_KEY%s (or pick one with --ai-provider). Skipping AI analysis.\n' \
-        "${YELLOW}" "${RESET}" "${BOLD}" "${RESET}" "${BOLD}" "${RESET}" >&2
-      AI=0; APPLY=0
+      # No key: fall back to local heuristic analysis instead of disabling --ai.
+      AI_LOCAL=1; APPLY=0
     fi
   fi
 fi

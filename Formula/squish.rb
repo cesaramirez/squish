@@ -4,7 +4,7 @@ class Squish < Formula
   url "https://github.com/cesaramirez/squish/archive/refs/tags/v0.5.1.tar.gz"
   # Compute the real checksum with:
   #   curl -sL https://github.com/cesaramirez/squish/archive/refs/tags/v0.5.1.tar.gz | shasum -a 256
-  sha256 "85bfe9d87f451d9adcd11645b373ba50796f35abda24e79bc32d03e526e44bcd"
+  sha256 "56e34c495436c465ccf3b3947944fed7a2bff3f16971e0f8e4409e73ee09b3d9"
   license "MIT"
   version "0.5.1"
 

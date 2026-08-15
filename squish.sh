@@ -918,27 +918,41 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
   note ""
 }
 
-for src in "${INPUTS[@]}"; do
-  dst="$(dest_for "$src")"
-  TAKEN[$dst]=1
-  optimize_one "$src" "$dst" || true
-done
+# One full optimization pass over INPUTS. Resets counters so it can run repeatedly
+# (watch mode). Prints the summary. Does NOT exit — the caller decides.
+run_pipeline_once() {
+  OK_COUNT=0; FAIL_COUNT=0; TOTAL_IN=0; TOTAL_OUT=0; TAKEN=()
+  local src dst
+  for src in "${INPUTS[@]}"; do
+    dst="$(dest_for "$src")"
+    TAKEN[$dst]=1
+    optimize_one "$src" "$dst" || true
+  done
+  # optimize_one installs a `trap ... RETURN` referencing its own local `tmp`;
+  # that trap is inherited by this frame, so clear it before we return (else it
+  # fires here where `tmp` is unset and trips `set -u`).
+  trap - RETURN
 
-# --- summary ------------------------------------------------------------------
-if [[ "$QUIET" -ne 1 && $(( OK_COUNT + FAIL_COUNT )) -gt 0 ]]; then
-  if (( OK_COUNT > 0 )); then
-    total_pct=$(pct_saved "$TOTAL_IN" "$TOTAL_OUT")
-    saved=$(( TOTAL_IN - TOTAL_OUT ))
-    printf '%s────────────────────────────────────────────%s\n' "$GRAY" "$RESET"
-    printf '%s%d file%s optimized%s' "$BOLD" "$OK_COUNT" "$([[ $OK_COUNT -ne 1 ]] && echo s)" "$RESET"
-    (( FAIL_COUNT > 0 )) && printf '%s, %d skipped%s' "$YELLOW" "$FAIL_COUNT" "$RESET"
-    printf '  %s·%s  %s%s%s saved  %s(−%s%% total)%s\n' \
-      "$GRAY" "$RESET" "$BOLD$GREEN" "$(human "$saved")" "$RESET" "$GREEN" "$total_pct" "$RESET"
-    [[ -n "$OUT_DIR" ]] && printf '%s→ %s%s\n' "$DIM" "$OUT_DIR/" "$RESET"
-  else
-    printf '%s✗ nothing optimized (%d skipped)%s\n' "$RED" "$FAIL_COUNT" "$RESET"
+  # --- summary ---
+  if [[ "$QUIET" -ne 1 && $(( OK_COUNT + FAIL_COUNT )) -gt 0 ]]; then
+    if (( OK_COUNT > 0 )); then
+      local total_pct saved
+      total_pct=$(pct_saved "$TOTAL_IN" "$TOTAL_OUT")
+      saved=$(( TOTAL_IN - TOTAL_OUT ))
+      printf '%s────────────────────────────────────────────%s\n' "$GRAY" "$RESET"
+      printf '%s%d file%s optimized%s' "$BOLD" "$OK_COUNT" "$([[ $OK_COUNT -ne 1 ]] && echo s)" "$RESET"
+      (( FAIL_COUNT > 0 )) && printf '%s, %d skipped%s' "$YELLOW" "$FAIL_COUNT" "$RESET"
+      printf '  %s·%s  %s%s%s saved  %s(−%s%% total)%s\n' \
+        "$GRAY" "$RESET" "$BOLD$GREEN" "$(human "$saved")" "$RESET" "$GREEN" "$total_pct" "$RESET"
+      [[ -n "$OUT_DIR" ]] && printf '%s→ %s%s\n' "$DIM" "$OUT_DIR/" "$RESET"
+    else
+      printf '%s✗ nothing optimized (%d skipped)%s\n' "$RED" "$FAIL_COUNT" "$RESET"
+    fi
   fi
-fi
+  return 0   # the summary's last command can be a falsy [[ ]]; never let that
+             # become the function's exit status (would trip `set -e` at the call).
+}
 
+run_pipeline_once
 # Exit 0 if at least one file was optimized; 1 only if everything failed.
 (( OK_COUNT > 0 )) && exit 0 || exit 1

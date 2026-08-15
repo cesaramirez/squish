@@ -92,6 +92,8 @@ QUIET=0
 NO_COLOR=0
 INPUTS=()
 RC_LOADED=0           # set to 1 when a ./.squishrc was read
+RECURSIVE=0           # -R / --recursive: descend into directory inputs
+declare -A WALK_ROOT=()   # discovered-file -> the directory input it came from
 
 # --- colors -------------------------------------------------------------------
 # Honor NO_COLOR, --no-color, and non-TTY output (pipes, CI) automatically.
@@ -184,6 +186,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -w|--width)    WIDTH="${2:?}"; shift 2 ;;
     -r|--retina)   RETINA=1; shift ;;
+    -R|--recursive) RECURSIVE=1; shift ;;
         --display) DISPLAY="${2:?}"; shift 2 ;;
     -c|--colors)   COLORS="${2:?}"; shift 2 ;;
         --webp)    WEBP=1; shift ;;
@@ -211,6 +214,40 @@ done
 
 setup_colors
 
+# discover_images DIR -> NUL-delimited list of supported image files under DIR,
+# sorted, deterministic. POSIX find (BSD+GNU): files only (no symlink follow),
+# case-insensitive extension match, skips any hidden path component.
+discover_images() {
+  local dir="$1"
+  find "$dir" -type f \( \
+      -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \
+    \) -not -path '*/.*' -print0 | sort -z
+}
+
+# expand_inputs: replace each directory in INPUTS with the images found inside
+# (requires -R). Records each discovered file's walk root in WALK_ROOT so
+# dest_for can mirror the tree under --out-dir. Files pass through unchanged.
+expand_inputs() {
+  local expanded=() item f found
+  for item in "${INPUTS[@]}"; do
+    if [[ -d "$item" ]]; then
+      (( RECURSIVE )) || die "$item is a directory (use -R to recurse into it)"
+      found=0
+      while IFS= read -r -d '' f; do
+        expanded+=("$f")
+        # shellcheck disable=SC2034  # consumed by dest_for in a later task (tree mirroring under --out-dir)
+        WALK_ROOT["$f"]="$item"
+        found=1
+      done < <(discover_images "$item")
+      (( found )) || note "${YELLOW}⚠${RESET} no supported images under ${item}"
+    else
+      expanded+=("$item")
+    fi
+  done
+  INPUTS=("${expanded[@]}")
+  [[ ${#INPUTS[@]} -gt 0 ]] || die "no images to process"
+}
+
 # --retina --display N resolves to a concrete width (2x the display size).
 if (( RETINA )); then
   (( DISPLAY > 0 )) || die "--retina needs --display N (the intended on-screen width)"
@@ -225,6 +262,9 @@ fi
 [[ -n "$OUTPUT" && ${#INPUTS[@]} -gt 1 ]] && die "--output can't be used with multiple inputs"
 [[ -n "$OUTPUT" && -n "$OUT_DIR" ]] && die "use either --output or --out-dir, not both"
 case "$NAME_AS" in optimized|plain|slug|retina|width) ;; *) die "--name-as must be one of: optimized, plain, slug, retina, width" ;; esac
+[[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
+expand_inputs
+[[ -n "$OUTPUT" && ${#INPUTS[@]} -gt 1 ]] && die "--output can't be used with multiple inputs"
 [[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
 if [[ "$NAME_AS" == "width" || "$NAME_AS" == "retina" ]] && (( WIDTH == 0 )); then
   die "--name-as $NAME_AS needs a resize (--width or --retina --display)"

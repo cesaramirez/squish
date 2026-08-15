@@ -336,3 +336,77 @@ setup() {
   run bash "$SQUISH" in.png --dry-run --no-color
   [[ "$output" == *".squishrc"* ]]
 }
+
+@test "recursive: -R processes images in nested subdirectories" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root/ui"
+  magick -size 40x40 xc:red "$root/logo.png"
+  magick -size 40x40 xc:blue "$root/ui/icon.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"logo"* ]]
+  [[ "$output" == *"icon"* ]]
+}
+
+@test "recursive: a directory input without -R is an error" {
+  d="$BATS_TEST_TMPDIR/adir"; mkdir -p "$d"
+  run bash "$SQUISH" "$d" --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"use -R"* ]]
+}
+
+@test "recursive: -R skips non-image files silently" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/mix"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/pic.png"
+  printf 'hello' > "$root/notes.txt"
+  printf '<svg/>' > "$root/vector.svg"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pic"* ]]
+  [[ "$output" != *"notes"* ]]
+  [[ "$output" != *"vector"* ]]
+}
+
+@test "recursive: -R skips hidden directories" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/proj"; mkdir -p "$root/.git" "$root/pub"
+  magick -size 40x40 xc:red "$root/.git/secret.png"
+  magick -size 40x40 xc:blue "$root/pub/shown.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"shown"* ]]
+  [[ "$output" != *"secret"* ]]
+}
+
+@test "recursive: -R over a directory with no images errors clearly" {
+  d="$BATS_TEST_TMPDIR/empty"; mkdir -p "$d"
+  printf 'x' > "$d/readme.md"
+  run bash "$SQUISH" "$d" -R --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no images"* ]]
+}
+
+@test "recursive: handles spaces in subdirectory and file names" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/my assets"; mkdir -p "$root/sub dir"
+  magick -size 40x40 xc:red "$root/sub dir/cool pic.png"
+  run bash "$SQUISH" "$root" -R --dry-run --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"cool pic"* || "$output" == *"cool-pic"* ]]
+}
+
+@test "recursive: non-regression — loose file input unaffected without -R" {
+  out="$BATS_TEST_TMPDIR/o.png"
+  run bash "$SQUISH" "$IN" --output "$out" --no-color
+  [ -f "$out" ]
+}
+
+@test "recursive: -R with --output errors (multiple inputs)" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/two"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/a.png"; magick -size 40x40 xc:blue "$root/b.png"
+  run bash "$SQUISH" "$root" -R --output "$BATS_TEST_TMPDIR/x.png" --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"can't be used with multiple inputs"* ]]
+}

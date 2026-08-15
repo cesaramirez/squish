@@ -71,10 +71,134 @@ setup() {
   [[ "$output" == *"unknown option"* ]]
 }
 
-@test "--ai with no key warns and still optimizes" {
-  out="$BATS_TEST_TMPDIR/ai.png"
-  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" "$IN" --ai --output "$out"
-  # Degrades gracefully: warns about the missing key but still writes the file.
+@test "--ai with no key runs local analysis and still optimizes" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  out="$BATS_TEST_TMPDIR/o.png"
+  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" "$IN" --ai --output "$out" --no-color
+  [ "$status" -eq 0 ]
   [ -f "$out" ]
-  [[ "$output" == *"API key"* || "$stderr" == *"API key"* || "$output" == *"⚠"* ]]
+  # Local block header must appear instead of the old "skipping" warning.
+  [[ "$output" == *"auto (local)"* ]]
+  [[ "$output" != *"Skipping AI analysis"* ]]
+}
+
+@test "sha256 helper: same bytes give same digest, different bytes differ" {
+  printf 'squish' > "$BATS_TEST_TMPDIR/a"
+  printf 'squish' > "$BATS_TEST_TMPDIR/b"
+  printf 'other'  > "$BATS_TEST_TMPDIR/c"
+  # Extract the sha256 function body and run it standalone.
+  fn="$(sed -n '/^sha256() {/,/^}/p' "$SQUISH")"
+  da="$(bash -c "$fn"$'\n'"sha256 '$BATS_TEST_TMPDIR/a'")"
+  db="$(bash -c "$fn"$'\n'"sha256 '$BATS_TEST_TMPDIR/b'")"
+  dc="$(bash -c "$fn"$'\n'"sha256 '$BATS_TEST_TMPDIR/c'")"
+  [ -n "$da" ]
+  [ "${#da}" -eq 64 ]
+  [ "$da" = "$db" ]
+  [ "$da" != "$dc" ]
+}
+
+@test "analyze_local classifies a flat 2-color image as logo" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  magick -size 300x300 xc:white -fill black -draw "rectangle 50,50 250,250" \
+    "$BATS_TEST_TMPDIR/flat.png"
+  fn="$(sed -n '/^analyze_local() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/flat.png'")"
+  kind="$(printf '%s' "$out" | jq -r '.kind')"
+  [ "$kind" = "logo" ]
+}
+
+@test "analyze_local classifies a smooth gradient as gradient" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  magick -size 400x400 gradient:'#0a3d1d-#1fae4f' "$BATS_TEST_TMPDIR/grad.png"
+  fn="$(sed -n '/^analyze_local() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/grad.png'")"
+  kind="$(printf '%s' "$out" | jq -r '.kind')"
+  [ "$kind" = "gradient" ]
+}
+
+@test "analyze_local classifies a tiny image as icon" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  magick -size 32x32 gradient:red-blue "$BATS_TEST_TMPDIR/ic.png"
+  fn="$(sed -n '/^analyze_local() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/ic.png'")"
+  [ "$(printf '%s' "$out" | jq -r '.kind')" = "icon" ]
+}
+
+@test "ai cache: a seeded entry is returned without a network call" {
+  command -v jq >/dev/null || skip "needs jq"
+  # Point the cache at the test tmp dir.
+  export XDG_CACHE_HOME="$BATS_TEST_TMPDIR/cache"
+  # Compute the key the way the script does and seed a JSON entry.
+  fn_sha="$(sed -n '/^sha256() {/,/^}/p' "$SQUISH")"
+  fn_key="$(sed -n '/^ai_cache_key() {/,/^}/p' "$SQUISH")"
+  key="$(bash -c "AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"ai_cache_key '$IN'")"
+  mkdir -p "$XDG_CACHE_HOME/squish"
+  printf '{"name":"seeded-name"}' > "$XDG_CACHE_HOME/squish/$key.json"
+  # ai_cache_get must return it.
+  fn_dir="$(sed -n '/^ai_cache_dir() {/,/^}/p' "$SQUISH")"
+  fn_get="$(sed -n '/^ai_cache_get() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "NO_CACHE=0 AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"$fn_dir"$'\n'"$fn_get"$'\n'"ai_cache_get '$IN'")"
+  [ "$(printf '%s' "$out" | jq -r '.name')" = "seeded-name" ]
+}
+
+@test "ai cache: --no-cache bypasses a seeded entry" {
+  command -v jq >/dev/null || skip "needs jq"
+  export XDG_CACHE_HOME="$BATS_TEST_TMPDIR/cache"
+  fn_sha="$(sed -n '/^sha256() {/,/^}/p' "$SQUISH")"
+  fn_key="$(sed -n '/^ai_cache_key() {/,/^}/p' "$SQUISH")"
+  fn_dir="$(sed -n '/^ai_cache_dir() {/,/^}/p' "$SQUISH")"
+  fn_get="$(sed -n '/^ai_cache_get() {/,/^}/p' "$SQUISH")"
+  key="$(bash -c "AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"ai_cache_key '$IN'")"
+  mkdir -p "$XDG_CACHE_HOME/squish"
+  printf '{"name":"seeded-name"}' > "$XDG_CACHE_HOME/squish/$key.json"
+  run bash -c "NO_CACHE=1 AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"$fn_dir"$'\n'"$fn_get"$'\n'"ai_cache_get '$IN'"
+  [ "$status" -ne 0 ]  # nothing returned when bypassed
+}
+
+@test "--context accepts auto" {
+  run bash "$SQUISH" "$IN" --ai --context auto --no-color
+  # With no key this becomes local mode, but the validation must not reject 'auto'.
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--context must be one of"* ]]
+}
+
+@test "ai_schema includes a context field when CONTEXT is auto" {
+  fn="$(sed -n '/^ai_schema() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "CONTEXT=auto AI_FIELDS=name,alt,params,html; $fn"$'\n'"ai_schema")"
+  printf '%s' "$out" | jq -e '.properties.context' >/dev/null
+}
+
+@test "ai_schema omits context field when CONTEXT is explicit" {
+  fn="$(sed -n '/^ai_schema() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "CONTEXT=web AI_FIELDS=name,alt,params,html; $fn"$'\n'"ai_schema")"
+  run bash -c "printf '%s' '$out' | jq -e '.properties.context'"
+  [ "$status" -ne 0 ]  # no context property
+}
+
+@test "--apply is allowed with multiple inputs" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  a="$BATS_TEST_TMPDIR/a.png"; b="$BATS_TEST_TMPDIR/b.png"
+  magick -size 60x60 xc:red "$a"; magick -size 60x60 xc:blue "$b"
+  # No key -> local mode; --apply is forced off internally, but the guard must
+  # not abort the run for multiple inputs.
+  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" "$a" "$b" --ai --apply --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"can't be used with multiple inputs"* ]]
+}
+
+@test "colliding output names get numeric suffixes" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  d="$BATS_TEST_TMPDIR/out"; mkdir -p "$d"
+  # Two differently-named sources that slug to the same name.
+  magick -size 60x60 xc:red  "$BATS_TEST_TMPDIR/Logo A.png"
+  magick -size 60x60 xc:blue "$BATS_TEST_TMPDIR/logo-a.png"
+  run bash "$SQUISH" "$BATS_TEST_TMPDIR/Logo A.png" "$BATS_TEST_TMPDIR/logo-a.png" \
+    --out-dir "$d" --no-color
+  [ "$status" -eq 0 ]
+  [ -f "$d/logo-a.png" ]
+  [ -f "$d/logo-a-2.png" ]
 }

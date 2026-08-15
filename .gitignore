@@ -12,3 +12,6 @@ dist/
 *.optimized.*
 *-min.png
 *@2x.png
+
+# SDD workspace scratch (superpowers)
+.superpowers/

@@ -41,15 +41,17 @@
 #                        e.g. --rename signature-arc --name-as retina -> signature-arc@2x.png
 #
 #   AI (vision — OpenAI or Anthropic; degrades gracefully if no key/tools):
-#       --ai           Analyze the image and print suggestions (name, alt, params, html).
+#       --ai           Analyze the image. With a key: full AI (name, alt, params,
+#                      html). Without a key: local heuristic (kind + params).
 #       --ai-provider P  auto (default) | openai | anthropic.
 #                        auto uses OPENAI_API_KEY, else ANTHROPIC_API_KEY.
-#       --context WHAT What the image is for, so the AI calibrates its output:
-#                        general (default) | email-signature | web | hero | icon | avatar
+#       --context WHAT auto (default under --ai) | general | email-signature |
+#                      web | hero | icon | avatar
 #       --ai-fields L  Comma list of fields to request (default: name,alt,params,html).
 #                        Any of: name, alt, params, html.
 #       --apply        Apply the AI's suggested name automatically (implies --ai).
 #       --ai-model M   Model override (default: gpt-4o-mini / claude-haiku-4-5).
+#       --no-cache     Bypass the AI result cache (~/.cache/squish/).
 #
 #       --no-color     Disable colored output (also respects NO_COLOR env var).
 #   -q, --quiet        Only print the per-file result lines.
@@ -60,6 +62,11 @@
 # AI keys:  set OPENAI_API_KEY or ANTHROPIC_API_KEY for --ai (auto-detected).
 
 set -euo pipefail
+
+if (( BASH_VERSINFO[0] < 4 )); then
+  printf 'squish requires bash 4 or newer (found %s). On macOS: brew install bash.\n' "${BASH_VERSION}" >&2
+  exit 1
+fi
 
 COLORS=128
 WIDTH=0
@@ -74,11 +81,13 @@ OUTPUT=""
 NAME_AS="slug"        # slug | optimized | plain | retina | width  (default: slug, URL-safe)
 RENAME=""             # replace the base name entirely
 AI=0                  # run vision analysis
+AI_LOCAL=0            # --ai requested but no key -> local heuristic mode
 APPLY=0               # apply the AI-suggested name automatically
-CONTEXT="general"     # general | email-signature | web | hero | icon | avatar
+CONTEXT=""            # general | email-signature | web | hero | icon | avatar | auto (resolved after arg parsing)
 AI_FIELDS="name,alt,params,html"
 AI_PROVIDER="auto"    # auto | anthropic | openai
 AI_MODEL=""           # empty = provider default (haiku / gpt-4o-mini)
+NO_CACHE=0            # skip AI result cache
 QUIET=0
 NO_COLOR=0
 INPUTS=()
@@ -122,6 +131,7 @@ while [[ $# -gt 0 ]]; do
         --ai-fields) AI_FIELDS="${2:?}"; shift 2 ;;
         --ai-model) AI_MODEL="${2:?}"; shift 2 ;;
         --ai-provider) AI_PROVIDER="${2:?}"; shift 2 ;;
+        --no-cache) NO_CACHE=1; shift ;;
         --no-color) NO_COLOR=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
     -h|--help)     NO_COLOR=1; usage; exit 0 ;;
@@ -150,8 +160,13 @@ case "$NAME_AS" in optimized|plain|slug|retina|width) ;; *) die "--name-as must 
 if [[ "$NAME_AS" == "width" || "$NAME_AS" == "retina" ]] && (( WIDTH == 0 )); then
   die "--name-as $NAME_AS needs a resize (--width or --retina --display)"
 fi
-case "$CONTEXT" in general|email-signature|web|hero|icon|avatar) ;; *) die "--context must be one of: general, email-signature, web, hero, icon, avatar" ;; esac
-(( APPLY )) && [[ ${#INPUTS[@]} -gt 1 ]] && die "--apply can't be used with multiple inputs (each name would collide)"
+
+# Default context: 'auto' under --ai (let the model infer), else 'general'.
+if [[ -z "$CONTEXT" ]]; then
+  if (( AI )); then CONTEXT="auto"; else CONTEXT="general"; fi
+fi
+
+case "$CONTEXT" in auto|general|email-signature|web|hero|icon|avatar) ;; *) die "--context must be one of: auto, general, email-signature, web, hero, icon, avatar" ;; esac
 
 # --- deps ---------------------------------------------------------------------
 # Image engines: sips (macOS, no deps) and/or ImageMagick (cross-platform).
@@ -202,9 +217,8 @@ if (( AI )); then
       none)      AI_KEY="" ;;
     esac
     if [[ -z "$AI_KEY" ]]; then
-      printf '%s⚠%s --ai needs an API key: set %sOPENAI_API_KEY%s or %sANTHROPIC_API_KEY%s (or pick one with --ai-provider). Skipping AI analysis.\n' \
-        "${YELLOW}" "${RESET}" "${BOLD}" "${RESET}" "${BOLD}" "${RESET}" >&2
-      AI=0; APPLY=0
+      # No key: fall back to local heuristic analysis instead of disabling --ai.
+      AI_LOCAL=1; APPLY=0
     fi
   fi
 fi
@@ -215,6 +229,15 @@ fi
 # Cross-platform file size in bytes (BSD/macOS `stat -f%z` vs GNU/Linux `stat -c%s`).
 filesize() {
   stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+}
+
+# Cross-platform sha256 of a file's bytes (macOS shasum vs Linux sha256sum).
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1
+  else
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+  fi
 }
 
 human() { # bytes -> human readable, fixed width
@@ -318,6 +341,74 @@ context_hint() {
   esac
 }
 
+# Heuristic image classification using ImageMagick only (no API). Emits JSON:
+#   {kind, suggested_colors, suggest_webp, suggest_avif}
+# Order of checks matters: icon (by size) before gradient/photo (by colors).
+analyze_local() {
+  local src="$1" w h colors kind
+
+  # Helper: compute mean edge magnitude in [0,1]; low = smooth (gradient), high = detailed.
+  edge_density() {
+    local img="$1" tmp mean=0
+    tmp="$(mktemp -t squish-edge.XXXXXX.png)" || tmp="/tmp/squish-edge-$$-$RANDOM.png"
+    if magick "${img}[0]" -colorspace Gray -edge 1 "$tmp" 2>/dev/null; then
+      mean="$(magick identify -format '%[fx:mean]' "$tmp" 2>/dev/null)"
+    fi
+    rm -f "$tmp"
+    [[ "$mean" =~ ^-?[0-9]*\.?[0-9]+([eE][+-]?[0-9]+)?$ ]] || mean="0"
+    printf '%s' "$mean"
+  }
+  # Dimensions and unique color count. %k can be large; keep it an integer.
+  w="$(magick identify -format '%w' "${src}[0]" 2>/dev/null || echo 0)"
+  h="$(magick identify -format '%h' "${src}[0]" 2>/dev/null || echo 0)"
+  colors="$(magick identify -format '%k' "${src}[0]" 2>/dev/null || echo 0)"
+  [[ "$w" =~ ^[0-9]+$ ]] || w=0
+  [[ "$h" =~ ^[0-9]+$ ]] || h=0
+  [[ "$colors" =~ ^[0-9]+$ ]] || colors=0
+
+  local maxdim=$(( w > h ? w : h ))
+  if (( maxdim > 0 && maxdim <= 64 )); then
+    kind="icon"
+  elif (( colors > 0 && colors <= 16 )); then
+    kind="logo"
+  elif (( colors >= 4096 )); then
+    # Many distinct colors. Smooth blends (gradients/renders) vs photos: use a
+    # cheap edge-density proxy. Photos have high edge energy; gradients low.
+    local edges
+    edges="$(edge_density "$src")"
+    # mean edge magnitude in [0,1]; gradients measure < 0.015, detailed images above.
+    if awk "BEGIN{exit !($edges < 0.015)}"; then
+      kind="gradient"
+    else
+      kind="photo"
+    fi
+  else
+    # 16 < colors < 4096: illustrations, logos with anti-aliasing, or gradients.
+    # Use edge-density to distinguish smooth blends from textured/detailed images.
+    local edges
+    edges="$(edge_density "$src")"
+    # mean edge magnitude in [0,1]; gradients measure < 0.015, detailed images above.
+    if awk "BEGIN{exit !($edges < 0.015)}"; then
+      kind="gradient"
+    else
+      kind="illustration"
+    fi
+  fi
+
+  local sc webp avif
+  case "$kind" in
+    photo|gradient) sc=256; webp=true;  avif=true ;;
+    illustration)   sc=128; webp=true;  avif=false ;;
+    logo)           sc=64;  webp=false; avif=false ;;
+    icon)           sc=32;  webp=false; avif=false ;;
+  esac
+  # Map illustration onto the photo/logo/gradient/icon enum the schema allows.
+  [[ "$kind" == "illustration" ]] && kind="logo"
+
+  jq -n --arg kind "$kind" --argjson sc "$sc" --argjson webp "$webp" --argjson avif "$avif" \
+    '{kind:$kind, suggested_colors:$sc, suggest_webp:$webp, suggest_avif:$avif}'
+}
+
 # Build the JSON schema (properties + required) from --ai-fields.
 ai_schema() {
   local props='' req='' want_name=0 want_alt=0 want_params=0 want_html=0 f
@@ -325,6 +416,10 @@ ai_schema() {
   for f in "${_f[@]}"; do case "$(printf '%s' "$f" | tr -d '[:space:]')" in
     name) want_name=1 ;; alt) want_alt=1 ;; params) want_params=1 ;; html) want_html=1 ;;
   esac; done
+  if [[ "$CONTEXT" == "auto" ]]; then
+    props+='"context":{"type":"string","enum":["general","email-signature","web","hero","icon","avatar"],"description":"the inferred purpose of this image"},'
+    req+='"context",'
+  fi
   (( want_name )) && { props+='"name":{"type":"string","description":"url-safe kebab-case slug describing the image content, no extension"},'; req+='"name",'; }
   (( want_alt )) &&  { props+='"alt":{"type":"string","description":"concise alt text for accessibility"},'; req+='"alt",'; }
   (( want_params )) && { props+='"kind":{"type":"string","enum":["photo","logo","illustration","gradient","icon","screenshot","other"],"description":"photo=camera photograph of real subjects; logo=brand mark, often flat colors; illustration=drawn/vector artwork; gradient=smooth color blends, 3D renders, glossy/metallic surfaces, abstract backgrounds; icon=tiny UI glyph; screenshot=UI capture. A metallic or glossy 3D render is gradient, NOT photo."},"suggested_colors":{"type":"integer","enum":[32,64,128,256],"description":"palette size: 256 for photos and smooth gradients (avoid banding); 128 for most illustrations/renders; 64 for flat logos; 32 for simple icons"},"suggest_webp":{"type":"boolean","description":"true if the image has smooth gradients or many colors where WebP saves meaningful bytes"},'; req+='"kind","suggested_colors","suggest_webp",'; }
@@ -337,6 +432,7 @@ ai_prompt() {
   printf 'You are analyzing an image to help optimize and label it. %s' "$(context_hint)"
   [[ -n "$dims" ]] && printf ' The file is %s px (width x height) — but the HTML width attribute must be a DISPLAY size per the context note, not these file dimensions.' "$dims"
   printf ' Rules: (1) name = url-safe kebab-case slug describing the visible content (lowercase, hyphens, no spaces, no accents, no file extension); prefer 2-4 descriptive words. (2) Classify kind by what the surface actually looks like: a glossy, metallic, or 3D-rendered surface with smooth color blends is "gradient", never "photo"; "photo" is only a real-world camera photograph. (3) alt = concise, describes the image for a screen reader. Return only the requested fields.'
+  [[ "$CONTEXT" == "auto" ]] && printf ' First infer what this image is for (avatar, hero banner, small icon, email-signature accent, or general web image) and set the "context" field; then calibrate name/alt/html to that inferred context.'
 }
 
 # --- Anthropic backend: base64 image block + output_config.format (json_schema).
@@ -384,22 +480,62 @@ ai_openai() {
   printf '%s' "$resp" | jq -e -c '.choices[0].message.content | fromjson' 2>/dev/null
 }
 
+# --- AI result cache ----------------------------------------------------------
+ai_cache_dir() { printf '%s/squish' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
+
+# Cache key: sha of (file-sha + model + context + fields), so any of them
+# changing regenerates. Uses a temp file because sha256 reads a file.
+ai_cache_key() {
+  local fsha material
+  fsha="$(sha256 "$1")"
+  material="${fsha}-${AI_MODEL}-${CONTEXT}-${AI_FIELDS}"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$material" | shasum -a 256 | cut -d' ' -f1
+  else
+    printf '%s' "$material" | sha256sum | cut -d' ' -f1
+  fi
+}
+
+ai_cache_get() {
+  (( NO_CACHE )) && return 1
+  local key file
+  key="$(ai_cache_key "$1")" || return 1
+  file="$(ai_cache_dir)/${key}.json"
+  [[ -s "$file" ]] || return 1
+  cat "$file"
+}
+
+ai_cache_set() {
+  (( NO_CACHE )) && return 0
+  local key dir file
+  key="$(ai_cache_key "$1")" || return 0
+  dir="$(ai_cache_dir)"; mkdir -p "$dir" 2>/dev/null || return 0
+  file="${dir}/${key}.json"
+  printf '%s' "$2" > "$file" 2>/dev/null || true
+}
+
 # Analyze an image. Echoes validated JSON to stdout, or nothing on failure.
 ai_analyze() {
-  local src="$1" b64 mt schema dims
+  local src="$1" b64 mt schema dims cached result
+  cached="$(ai_cache_get "$src")" && { printf '%s' "$cached"; return 0; }
   b64="$(base64 < "$src" | tr -d '\n')" || return 1
   mt="$(media_type_of "$src")"
   schema="$(ai_schema)"
   dims="$(dims_of "$src")"   # WxH of the analyzed (resized) image, for the prompt
   case "$AI_PROVIDER" in
-    openai)    ai_openai    "$mt" "$b64" "$schema" "$dims" ;;
-    anthropic) ai_anthropic "$mt" "$b64" "$schema" "$dims" ;;
+    openai)    result="$(ai_openai    "$mt" "$b64" "$schema" "$dims")" ;;
+    anthropic) result="$(ai_anthropic "$mt" "$b64" "$schema" "$dims")" ;;
     *) return 1 ;;
   esac
+  [[ -n "$result" ]] || return 1
+  ai_cache_set "$src" "$result"
+  printf '%s' "$result"
 }
 
 # --- state --------------------------------------------------------------------
 TOTAL_IN=0 TOTAL_OUT=0 OK_COUNT=0 FAIL_COUNT=0
+# Requires bash 4+ (associative arrays); guarded near top of script.
+declare -A TAKEN=()   # destination paths already claimed this run
 AI_JSON=""   # per-file AI result, consumed by dest_for/reporting
 
 # Compress WORK into DST, picking the path by output extension.
@@ -469,10 +605,14 @@ optimize_one() {
   #      the final name is chosen so --apply can rename from the suggestion.
   AI_JSON=""
   if (( AI )); then
-    AI_JSON="$(ai_analyze "$work")" || AI_JSON=""
-    if (( APPLY )) && [[ -n "$AI_JSON" ]]; then
-      local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
-      [[ -n "$ai_name" ]] && dst="$(RENAME="$ai_name" dest_for "$src")"
+    if (( AI_LOCAL )); then
+      AI_JSON="$(analyze_local "$work")" || AI_JSON=""
+    else
+      AI_JSON="$(ai_analyze "$work")" || AI_JSON=""
+      if (( APPLY )) && [[ -n "$AI_JSON" ]]; then
+        local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
+        [[ -n "$ai_name" ]] && dst="$(RENAME="$ai_name" dest_for "$src")"
+      fi
     fi
   fi
 
@@ -532,27 +672,42 @@ optimize_one() {
 
   # 4) AI suggestions block
   if (( AI )) && [[ -n "$AI_JSON" ]] && [[ "$QUIET" -ne 1 ]]; then
-    printf '   %s🧠 AI%s %s(%s · %s)%s\n' "$CYAN" "$RESET" "$DIM" "$AI_MODEL" "$CONTEXT" "$RESET"
-    local v
-    v="$(printf '%s' "$AI_JSON" | jq -r '.name   // empty')"; [[ -n "$v" ]] && printf '      %sname%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$v"
-    printf '%s' "$RESET"
-    v="$(printf '%s' "$AI_JSON" | jq -r '.alt    // empty')"; [[ -n "$v" ]] && printf '      %salt%s    "%s"\n' "$GRAY" "$RESET" "$v"
-    if printf '%s' "$AI_JSON" | jq -e '.kind' >/dev/null 2>&1; then
-      printf '      %sparams%s %s → --colors %s%s\n' "$GRAY" "$RESET" \
-        "$(printf '%s' "$AI_JSON" | jq -r '.kind')" \
+    if (( AI_LOCAL )); then
+      printf '   %s🔍 auto (local)%s\n' "$CYAN" "$RESET"
+      printf '      %skind%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$(printf '%s' "$AI_JSON" | jq -r '.kind')"
+      printf '%s' "$RESET"
+      printf '      %sparams%s → --colors %s%s%s\n' "$GRAY" "$RESET" \
         "$(printf '%s' "$AI_JSON" | jq -r '.suggested_colors')" \
-        "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')"
-    fi
-    v="$(printf '%s' "$AI_JSON" | jq -r '.html   // empty')"
-    if [[ -n "$v" ]]; then
-      printf '      %shtml%s\n' "$GRAY" "$RESET"
-      printf '%s' "$v" | sed "s|SRC|$(basename "$dst")|g; s/^/        /"
-      printf '\n'
-    fi
-    # If not applied, offer the ready command to apply the suggested name.
-    if (( ! APPLY )); then
-      local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
-      [[ -n "$ai_name" ]] && printf '      %sapply%s  squish "%s" --rename %s\n' "$GRAY" "$RESET" "$(basename "$src")" "$ai_name"
+        "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')" \
+        "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_avif then " --avif" else "" end')"
+    else
+      local ctx_disp="$CONTEXT"
+      if [[ "$CONTEXT" == "auto" ]]; then
+        local inferred; inferred="$(printf '%s' "$AI_JSON" | jq -r '.context // empty')"
+        [[ -n "$inferred" ]] && ctx_disp="auto→$inferred"
+      fi
+      printf '   %s🧠 AI%s %s(%s · %s)%s\n' "$CYAN" "$RESET" "$DIM" "$AI_MODEL" "$ctx_disp" "$RESET"
+      local v
+      v="$(printf '%s' "$AI_JSON" | jq -r '.name   // empty')"; [[ -n "$v" ]] && printf '      %sname%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$v"
+      printf '%s' "$RESET"
+      v="$(printf '%s' "$AI_JSON" | jq -r '.alt    // empty')"; [[ -n "$v" ]] && printf '      %salt%s    "%s"\n' "$GRAY" "$RESET" "$v"
+      if printf '%s' "$AI_JSON" | jq -e '.kind' >/dev/null 2>&1; then
+        printf '      %sparams%s %s → --colors %s%s\n' "$GRAY" "$RESET" \
+          "$(printf '%s' "$AI_JSON" | jq -r '.kind')" \
+          "$(printf '%s' "$AI_JSON" | jq -r '.suggested_colors')" \
+          "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')"
+      fi
+      v="$(printf '%s' "$AI_JSON" | jq -r '.html   // empty')"
+      if [[ -n "$v" ]]; then
+        printf '      %shtml%s\n' "$GRAY" "$RESET"
+        printf '%s' "$v" | sed "s|SRC|$(basename "$dst")|g; s/^/        /"
+        printf '\n'
+      fi
+      # If not applied, offer the ready command to apply the suggested name.
+      if (( ! APPLY )); then
+        local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
+        [[ -n "$ai_name" ]] && printf '      %sapply%s  squish "%s" --rename %s\n' "$GRAY" "$RESET" "$(basename "$src")" "$ai_name"
+      fi
     fi
   fi
   note ""
@@ -597,6 +752,12 @@ dest_for() {
   if [[ "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" == "$(cd "$dir" 2>/dev/null && pwd)/$stem.$ext" ]]; then
     dst="$dir/$stem-min.$ext"
   fi
+  # If this destination was already claimed this run, add -2, -3, ...
+  if [[ -n "${TAKEN[$dst]:-}" ]]; then
+    local base="${dst%.*}" ext2="${dst##*.}" n=2
+    while [[ -n "${TAKEN[${base}-${n}.${ext2}]:-}" ]]; do n=$((n+1)); done
+    dst="${base}-${n}.${ext2}"
+  fi
   printf '%s' "$dst"
 }
 
@@ -617,7 +778,9 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
 }
 
 for src in "${INPUTS[@]}"; do
-  optimize_one "$src" "$(dest_for "$src")" || true
+  dst="$(dest_for "$src")"
+  TAKEN[$dst]=1
+  optimize_one "$src" "$dst" || true
 done
 
 # --- summary ------------------------------------------------------------------

@@ -466,3 +466,154 @@ setup() {
   [ "$status" -eq 0 ]
   [ -f "$dist/pic.png" ]
 }
+
+@test "watch: --watch with --dry-run is rejected" {
+  run bash "$SQUISH" "$IN" --watch --dry-run --no-color
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"watch"* && "$output" == *"dry-run"* ]]
+}
+
+@test "watch: file_stamp changes when a file changes, empty when absent" {
+  fn_size="$(sed -n '/^filesize() {/,/^}/p' "$SQUISH")"
+  fn_stamp="$(sed -n '/^file_stamp() {/,/^}/p' "$SQUISH")"
+  f="$BATS_TEST_TMPDIR/s.png"; cp "$IN" "$f"
+  s1="$(bash -c "$fn_size"$'\n'"$fn_stamp"$'\n'"file_stamp '$f'")"
+  [ -n "$s1" ]
+  sleep 1; printf 'more' >> "$f"        # change size (and mtime)
+  s2="$(bash -c "$fn_size"$'\n'"$fn_stamp"$'\n'"file_stamp '$f'")"
+  [ "$s1" != "$s2" ]
+  rm -f "$f"
+  s3="$(bash -c "$fn_size"$'\n'"$fn_stamp"$'\n'"file_stamp '$f'")"
+  [ -z "$s3" ]
+}
+
+@test "watch: first pass optimizes, then a source edit re-optimizes it" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w"; mkdir -p "$work"
+  magick -size 80x80 xc:red "$work/a.png"
+  out="$work/a-min.png"
+  # Start watching in the background with a short interval.
+  WATCH_INTERVAL=1 bash "$SQUISH" "$work/a.png" --watch --no-color >/dev/null 2>&1 &
+  pid=$!
+  # Wait for the first pass to produce output.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$out" ] && break; sleep 0.5; done
+  [ -f "$out" ]
+  first_mtime="$(stat -f %m "$out" 2>/dev/null || stat -c %Y "$out" 2>/dev/null)"
+  # Edit the source; the watcher must re-optimize within a couple intervals.
+  sleep 1; magick -size 80x80 xc:blue "$work/a.png"
+  updated=0
+  for _ in 1 2 3 4 5 6 7 8; do
+    m="$(stat -f %m "$out" 2>/dev/null || stat -c %Y "$out" 2>/dev/null)"
+    [ "$m" != "$first_mtime" ] && { updated=1; break; }
+    sleep 0.5
+  done
+  kill "$pid" 2>/dev/null
+  [ "$updated" -eq 1 ]
+}
+
+@test "watch: a generated output does not re-trigger the loop" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w2"; mkdir -p "$work"
+  magick -size 80x80 xc:red "$work/b.png"
+  out="$work/b-min.png"
+  WATCH_INTERVAL=1 bash "$SQUISH" "$work/b.png" --watch --no-color >/dev/null 2>&1 &
+  pid=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -f "$out" ] && break; sleep 0.5; done
+  [ -f "$out" ]
+  m1="$(stat -f %m "$out" 2>/dev/null || stat -c %Y "$out" 2>/dev/null)"
+  # Do NOT touch the source. Wait several intervals; the output must be stable
+  # (the watcher must not re-optimize because its own output "changed").
+  sleep 3
+  m2="$(stat -f %m "$out" 2>/dev/null || stat -c %Y "$out" 2>/dev/null)"
+  kill "$pid" 2>/dev/null
+  [ "$m1" = "$m2" ]
+}
+
+@test "watch: SIGTERM stops cleanly with a message" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w3"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/c.png"
+  log="$BATS_TEST_TMPDIR/w3.log"
+  WATCH_INTERVAL=1 bash "$SQUISH" "$work/c.png" --watch >"$log" 2>&1 &
+  pid=$!
+  sleep 2
+  kill -TERM "$pid" 2>/dev/null
+  wait "$pid"; rc=$?
+  [ "$rc" -eq 0 ]
+  grep -q "stopped watching" "$log"
+}
+
+@test "watch: -R picks up a file added to a watched directory mid-run" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/wd"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/first.png"
+  WATCH_INTERVAL=1 bash "$SQUISH" "$work" -R --watch --no-color >/dev/null 2>&1 &
+  pid=$!
+  # wait for first pass to optimize the initial file
+  for _ in $(seq 1 12); do [ -f "$work/first-min.png" ] && break; sleep 0.5; done
+  [ -f "$work/first-min.png" ]
+  # drop a NEW file into the watched dir; it must be optimized within a few ticks
+  sleep 1; magick -size 60x60 xc:blue "$work/second.png"
+  found=0
+  for _ in $(seq 1 12); do [ -f "$work/second-min.png" ] && { found=1; break; }; sleep 0.5; done
+  # Anti-loop: give it a few more ticks and confirm the file count stops growing
+  # (the generated *-min.png outputs must never be re-discovered as new sources).
+  sleep 3
+  count_before="$(find "$work" -name '*.png' | wc -l | tr -d ' ')"
+  sleep 2
+  count_after="$(find "$work" -name '*.png' | wc -l | tr -d ' ')"
+  kill "$pid" 2>/dev/null
+  [ "$found" -eq 1 ]
+  [ "$count_before" = "$count_after" ]
+}
+
+@test "watch: SIGTERM interrupts the sleep promptly instead of waiting a full interval" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w4"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/d.png"
+  log="$BATS_TEST_TMPDIR/w4.log"
+  WATCH_INTERVAL=10 bash "$SQUISH" "$work/d.png" --watch >"$log" 2>&1 &
+  pid=$!
+  sleep 1
+  start="$(date +%s)"
+  kill -TERM "$pid" 2>/dev/null
+  wait "$pid"; rc=$?
+  elapsed=$(( $(date +%s) - start ))
+  [ "$rc" -eq 0 ]
+  [ "$elapsed" -lt 3 ]
+  grep -q "stopped watching" "$log"
+}
+
+@test "watch: --out-dir with a trailing slash nested in a watched tree does not run away" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/logo.png"
+  # trailing slash on --out-dir, out-dir nested inside the watched -R tree
+  WATCH_INTERVAL=1 bash "$SQUISH" "$root" -R --watch --out-dir "$root/dist/" --no-color >/dev/null 2>&1 &
+  pid=$!
+  sleep 5
+  kill "$pid" 2>/dev/null
+  # No runaway nesting: dist/dist must never be created.
+  [ ! -e "$root/dist/dist" ]
+  # And the legit output exists exactly once.
+  [ -f "$root/dist/logo.png" ]
+}
+
+@test "watch: SIGTERM kills the backgrounded sleep, none lingers after exit" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w5"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/e.png"
+  WATCH_INTERVAL=20 bash "$SQUISH" "$work/e.png" --watch --no-color >/dev/null 2>&1 &
+  pid=$!
+  sleep 1
+  # Find the sleep child before killing the parent.
+  sleep_pid="$(pgrep -P "$pid" -f 'sleep 20' 2>/dev/null || true)"
+  kill -TERM "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  sleep 0.5
+  # The sleep child must not still be alive (reparented or otherwise).
+  if [ -n "$sleep_pid" ]; then
+    run kill -0 "$sleep_pid"
+    [ "$status" -ne 0 ]
+  fi
+}

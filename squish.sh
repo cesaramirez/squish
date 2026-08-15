@@ -94,6 +94,8 @@ INPUTS=()
 RC_LOADED=0           # set to 1 when a ./.squishrc was read
 RECURSIVE=0           # -R / --recursive: descend into directory inputs
 declare -A WALK_ROOT=()   # discovered-file -> the directory input it came from
+WATCH=0               # --watch: optimize, then poll sources and re-optimize on change
+declare -a RAW_INPUTS=()  # INPUTS as the user typed them, before expand_inputs flattens dirs
 
 # --- colors -------------------------------------------------------------------
 # Honor NO_COLOR, --no-color, and non-TTY output (pipes, CI) automatically.
@@ -204,6 +206,7 @@ while [[ $# -gt 0 ]]; do
         --ai-model) AI_MODEL="${2:?}"; shift 2 ;;
         --ai-provider) AI_PROVIDER="${2:?}"; shift 2 ;;
         --no-cache) NO_CACHE=1; shift ;;
+        --watch)   WATCH=1; shift ;;
         --no-color) NO_COLOR=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
     -h|--help)     NO_COLOR=1; usage; exit 0 ;;
@@ -228,6 +231,7 @@ discover_images() {
 # (requires -R). Records each discovered file's walk root in WALK_ROOT so
 # dest_for can mirror the tree under --out-dir. Files pass through unchanged.
 expand_inputs() {
+  WALK_ROOT=()   # rebuilt fresh each call; stale keys must not accumulate across watch ticks
   local expanded=() item f found
   for item in "${INPUTS[@]}"; do
     if [[ -d "$item" ]]; then
@@ -260,14 +264,21 @@ fi
 [[ "$WIDTH" =~ ^[0-9]+$ ]] || die "--width must be a positive integer"
 [[ -n "$OUTPUT" && ${#INPUTS[@]} -gt 1 ]] && die "--output can't be used with multiple inputs"
 [[ -n "$OUTPUT" && -n "$OUT_DIR" ]] && die "use either --output or --out-dir, not both"
+# Normalize away any trailing slash so composed dst paths (dest_for) always match the
+# single-slash paths `find`/discover_images report — a trailing slash would otherwise
+# produce a "dir//file" key that the watch anti-loop GENERATED filter can't match,
+# causing generated outputs to be re-discovered as new sources (unbounded runaway).
+[[ -n "$OUT_DIR" ]] && OUT_DIR="${OUT_DIR%/}"
 case "$NAME_AS" in optimized|plain|slug|retina|width) ;; *) die "--name-as must be one of: optimized, plain, slug, retina, width" ;; esac
 [[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
+RAW_INPUTS=("${INPUTS[@]}")   # snapshot before flattening, so --watch can re-walk directories
 expand_inputs
 [[ -n "$OUTPUT" && ${#INPUTS[@]} -gt 1 ]] && die "--output can't be used with multiple inputs"
 [[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
 if [[ "$NAME_AS" == "width" || "$NAME_AS" == "retina" ]] && (( WIDTH == 0 )); then
   die "--name-as $NAME_AS needs a resize (--width or --retina --display)"
 fi
+(( WATCH )) && (( DRY_RUN )) && die "--watch can't be combined with --dry-run"
 
 # Default context: 'auto' under --ai (let the model infer), else 'general'.
 if [[ -z "$CONTEXT" ]]; then
@@ -346,6 +357,16 @@ fi
 # Cross-platform file size in bytes (BSD/macOS `stat -f%z` vs GNU/Linux `stat -c%s`).
 filesize() {
   stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+}
+
+# file_stamp FILE -> "mtime:size" for change detection, or "" if the file is gone.
+file_stamp() {
+  local f="$1"
+  [[ -f "$f" ]] || { printf ''; return; }
+  local mt sz
+  mt="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
+  sz="$(filesize "$f")"
+  printf '%s:%s' "$mt" "$sz"
 }
 
 # Cross-platform sha256 of a file's bytes (macOS shasum vs Linux sha256sum).
@@ -918,27 +939,84 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
   note ""
 }
 
-for src in "${INPUTS[@]}"; do
-  dst="$(dest_for "$src")"
-  TAKEN[$dst]=1
-  optimize_one "$src" "$dst" || true
-done
+# One full optimization pass over INPUTS. Resets counters so it can run repeatedly
+# (watch mode). Prints the summary. Does NOT exit — the caller decides.
+run_pipeline_once() {
+  OK_COUNT=0; FAIL_COUNT=0; TOTAL_IN=0; TOTAL_OUT=0; TAKEN=()
+  local src dst
+  for src in "${INPUTS[@]}"; do
+    dst="$(dest_for "$src")"
+    TAKEN[$dst]=1
+    optimize_one "$src" "$dst" || true
+  done
+  # optimize_one installs a `trap ... RETURN` referencing its own local `tmp`;
+  # that trap is inherited by this frame, so clear it before we return (else it
+  # fires here where `tmp` is unset and trips `set -u`).
+  trap - RETURN
 
-# --- summary ------------------------------------------------------------------
-if [[ "$QUIET" -ne 1 && $(( OK_COUNT + FAIL_COUNT )) -gt 0 ]]; then
-  if (( OK_COUNT > 0 )); then
-    total_pct=$(pct_saved "$TOTAL_IN" "$TOTAL_OUT")
-    saved=$(( TOTAL_IN - TOTAL_OUT ))
-    printf '%s────────────────────────────────────────────%s\n' "$GRAY" "$RESET"
-    printf '%s%d file%s optimized%s' "$BOLD" "$OK_COUNT" "$([[ $OK_COUNT -ne 1 ]] && echo s)" "$RESET"
-    (( FAIL_COUNT > 0 )) && printf '%s, %d skipped%s' "$YELLOW" "$FAIL_COUNT" "$RESET"
-    printf '  %s·%s  %s%s%s saved  %s(−%s%% total)%s\n' \
-      "$GRAY" "$RESET" "$BOLD$GREEN" "$(human "$saved")" "$RESET" "$GREEN" "$total_pct" "$RESET"
-    [[ -n "$OUT_DIR" ]] && printf '%s→ %s%s\n' "$DIM" "$OUT_DIR/" "$RESET"
-  else
-    printf '%s✗ nothing optimized (%d skipped)%s\n' "$RED" "$FAIL_COUNT" "$RESET"
+  # --- summary ---
+  if [[ "$QUIET" -ne 1 && $(( OK_COUNT + FAIL_COUNT )) -gt 0 ]]; then
+    if (( OK_COUNT > 0 )); then
+      local total_pct saved
+      total_pct=$(pct_saved "$TOTAL_IN" "$TOTAL_OUT")
+      saved=$(( TOTAL_IN - TOTAL_OUT ))
+      printf '%s────────────────────────────────────────────%s\n' "$GRAY" "$RESET"
+      printf '%s%d file%s optimized%s' "$BOLD" "$OK_COUNT" "$([[ $OK_COUNT -ne 1 ]] && echo s)" "$RESET"
+      (( FAIL_COUNT > 0 )) && printf '%s, %d skipped%s' "$YELLOW" "$FAIL_COUNT" "$RESET"
+      printf '  %s·%s  %s%s%s saved  %s(−%s%% total)%s\n' \
+        "$GRAY" "$RESET" "$BOLD$GREEN" "$(human "$saved")" "$RESET" "$GREEN" "$total_pct" "$RESET"
+      [[ -n "$OUT_DIR" ]] && printf '%s→ %s%s\n' "$DIM" "$OUT_DIR/" "$RESET"
+    else
+      printf '%s✗ nothing optimized (%d skipped)%s\n' "$RED" "$FAIL_COUNT" "$RESET"
+    fi
   fi
-fi
+  return 0   # the summary's last command can be a falsy [[ ]]; never let that
+             # become the function's exit status (would trip `set -e` at the call).
+}
 
-# Exit 0 if at least one file was optimized; 1 only if everything failed.
-(( OK_COUNT > 0 )) && exit 0 || exit 1
+# Watch loop: first pass, then poll sources (mtime+size) and re-optimize changes.
+# Snapshot covers only sources (INPUTS), never outputs, so squish's own writes
+# never re-trigger. Ctrl-C / SIGTERM stops cleanly.
+run_watch() {
+  local -a ORIG_INPUTS=("${RAW_INPUTS[@]}")   # directories/files as the user typed them
+  declare -A STAMP
+  declare -A GENERATED                     # destination paths squish has written; never sources
+  run_pipeline_once                        # first pass: optimize the already-expanded INPUTS
+  local f
+  for f in "${!TAKEN[@]}"; do GENERATED["$f"]=1; done
+  for f in "${INPUTS[@]}"; do STAMP["$f"]="$(file_stamp "$f")"; done
+  note "${DIM}watching ${#INPUTS[@]} source(s) — Ctrl-C to stop${RESET}"
+  local _sleep_pid=""
+  trap 'kill "$_sleep_pid" 2>/dev/null; note ""; note "${GREEN}✓${RESET} stopped watching"; exit 0' INT TERM
+
+  while true; do
+    sleep "${WATCH_INTERVAL:-2}" & _sleep_pid=$!
+    wait "$_sleep_pid" || true
+    INPUTS=("${ORIG_INPUTS[@]}")            # reset before re-discovery
+    expand_inputs                          # re-walk directories (picks up new files)
+    local candidates=() changed=() cur
+    for f in "${INPUTS[@]}"; do
+      [[ -n "${GENERATED[$f]:-}" ]] && continue   # our own output; never a source
+      candidates+=("$f")
+    done
+    # Guard against expanding an empty array under `set -u` on bash 4.0-4.3, where
+    # "${candidates[@]}" on an empty array is an unset-variable error (fixed in 4.4+).
+    if (( ${#candidates[@]} )); then INPUTS=("${candidates[@]}"); else INPUTS=(); fi
+    for f in "${INPUTS[@]}"; do
+      cur="$(file_stamp "$f")"
+      if [[ "$cur" != "${STAMP[$f]:-}" ]]; then changed+=("$f"); STAMP["$f"]="$cur"; fi
+    done
+    (( ${#changed[@]} )) || continue
+    INPUTS=("${changed[@]}")
+    run_pipeline_once
+    for f in "${!TAKEN[@]}"; do GENERATED["$f"]=1; done
+  done
+}
+
+if (( WATCH )); then
+  run_watch
+else
+  run_pipeline_once
+  # Exit 0 if at least one file was optimized; 1 only if everything failed.
+  (( OK_COUNT > 0 )) && exit 0 || exit 1
+fi

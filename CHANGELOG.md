@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Recursive traversal: pass a directory with `-R`/`--recursive` to optimize every
   supported image inside it (any depth). Skips hidden dirs and non-images, never
   follows symlinks. With `--out-dir`, the source tree is mirrored into the target.
+- Watch mode: `--watch` optimizes once, then polls the sources every 2s and
+  re-optimizes any that change or newly appear (recursive with `-R`). Only
+  sources are watched, so generated outputs never re-trigger it. Ctrl-C stops.
 
 ## [0.4.0] - 2026-08-15
 

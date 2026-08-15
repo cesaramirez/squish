@@ -617,3 +617,42 @@ setup() {
     [ "$status" -ne 0 ]
   fi
 }
+
+@test "compress failure (no ImageMagick for JPEG) is reported, not a false success" {
+  command -v magick >/dev/null || skip "test shims magick; needs a real one to build the fixture"
+  # Build a JPEG fixture with the real magick.
+  magick -size 60x60 xc:red "$BATS_TEST_TMPDIR/pic.jpg"
+  # Shim magick to fail, keep everything else on PATH.
+  shim="$BATS_TEST_TMPDIR/shim"; mkdir -p "$shim"
+  printf '#!/bin/sh\nexit 127\n' > "$shim/magick"; chmod +x "$shim/magick"
+  out="$BATS_TEST_TMPDIR/out.jpg"
+  PATH="$shim:$PATH" run bash "$SQUISH" "$BATS_TEST_TMPDIR/pic.jpg" --output "$out" --no-color
+  # Must NOT claim success, and must NOT leave a zero-byte output.
+  [[ "$output" != *"1 file optimized"* ]]
+  [ ! -s "$out" ]
+  [[ "$output" == *"compress failed"* || "$output" == *"nothing optimized"* ]]
+}
+
+@test "human and pct_saved work without bc on PATH" {
+  fn_human="$(sed -n '/^human() {/,/^}/p' "$SQUISH")"
+  fn_pct="$(sed -n '/^pct_saved() {/,/^}/p' "$SQUISH")"
+  # A PATH with the shells/coreutils but guaranteed no bc: use a dir of symlinks
+  # to just the tools these funcs need (printf is a builtin; nothing external).
+  nobc="$BATS_TEST_TMPDIR/nobc"; mkdir -p "$nobc"
+  # Resolve bash's absolute path before wiping PATH, so `bash -c` itself can
+  # still be exec'd (an empty PATH would otherwise make even `bash` unresolvable).
+  bash_bin="$(command -v bash)"
+  # Run the extracted functions under an empty PATH (they use only builtins).
+  h_kb="$(PATH= "$bash_bin" -c "$fn_human"$'\n'"human 1536")"      # 1.5 KB
+  h_mb="$(PATH= "$bash_bin" -c "$fn_human"$'\n'"human 1572864")"   # 1.5 MB
+  h_b="$(PATH=  "$bash_bin" -c "$fn_human"$'\n'"human 512")"       # 512 B
+  [ "$h_kb" = "1.5 KB" ]
+  [ "$h_mb" = "1.5 MB" ]
+  [ "$h_b" = "512 B" ]
+  p1="$(PATH= "$bash_bin" -c "$fn_pct"$'\n'"pct_saved 1000 250")"  # 75
+  p0="$(PATH= "$bash_bin" -c "$fn_pct"$'\n'"pct_saved 0 0")"        # 0 (div-by-zero guard)
+  pneg="$(PATH= "$bash_bin" -c "$fn_pct"$'\n'"pct_saved 100 158")" # -58 (grew)
+  [ "$p1" = "75" ]
+  [ "$p0" = "0" ]
+  [ "$pneg" = "-58" ]
+}

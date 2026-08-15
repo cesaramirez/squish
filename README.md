@@ -11,15 +11,7 @@ compatibility (Outlook desktop, older webmails, everything), with an optional
 semantic filename, alt text, optimal parameters, and a ready-to-paste HTML
 snippet — tuned per context (email signature, web, hero, icon, avatar).
 
-```
-✓ forma_derecha 1.png → signature-arc-right-green.png  1154x1251 → 400x433px
-   ███████████░  1016.2 KB → 40.4 KB    −96%
-   🧠 AI (gpt-4o-mini · email-signature)
-      name   signature-arc-right-green
-      alt    "Green metallic decorative arc, right side"
-      params gradient → --colors 256 --webp
-      html   <img src="signature-arc-right-green.png" width="200" alt="Green metallic decorative arc">
-```
+![squish in action](demo.png)
 
 No banding on gradients, no bloated files, no `%20` in your URLs.
 

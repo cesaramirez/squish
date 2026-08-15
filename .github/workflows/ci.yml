@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: shellcheck -S warning squish.sh install.sh
+
+      - name: Bash syntax check
+        run: bash -n squish.sh
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats and image tooling
+        run: sudo apt-get update && sudo apt-get install -y bats pngquant imagemagick
+
+      - name: Install oxipng (release binary)
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL https://api.github.com/repos/oxipng/oxipng/releases/latest \
+            | grep -oP '"tag_name":\s*"\K[^"]+')"
+          echo "oxipng ${version}"
+          url="https://github.com/oxipng/oxipng/releases/download/${version}/oxipng-${version#v}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL "$url" -o /tmp/oxipng.tar.gz
+          tar -xzf /tmp/oxipng.tar.gz -C /tmp
+          sudo install -m 0755 "/tmp/oxipng-${version#v}-x86_64-unknown-linux-gnu/oxipng" /usr/local/bin/oxipng
+          oxipng --version
+
+      - name: Run bats tests
+        run: bats tests/

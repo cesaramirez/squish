@@ -1,5 +1,6 @@
 # squish
 
+[![CI](https://github.com/cesaramirez/squish/actions/workflows/ci.yml/badge.svg)](https://github.com/cesaramirez/squish/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 ![Shell](https://img.shields.io/badge/shell-bash-121011.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)
@@ -43,7 +44,7 @@ brew install webp jq        # optional: --webp and --ai
 **Linux** (Debian/Ubuntu):
 
 ```bash
-sudo apt install pngquant webp jq
+sudo apt install pngquant imagemagick webp jq
 # oxipng: cargo install oxipng   (or grab a release binary)
 ```
 
@@ -60,30 +61,42 @@ squish --help
 
 | Tool | Needed for | Required? |
 |------|-----------|:---------:|
-| `pngquant` | palette compression | ✅ |
-| `oxipng` | lossless recompression | ✅ |
-| `sips` | `--width` / `--retina` (ships with macOS) | optional |
-| `cwebp` | `--webp` (`brew install webp`) | optional |
+| `pngquant` | PNG palette compression | ✅ |
+| `oxipng` | PNG lossless recompression | ✅ |
+| `imagemagick` | resize on Linux, JPEG, `--avif` | recommended |
+| `sips` | resize on macOS (built in) | — |
+| `cwebp` | `--webp` (or ImageMagick) | optional |
 | `curl` + `jq` | `--ai` (vision analysis) | optional |
 
-> On Linux, `sips` doesn't exist, so `--width`/`--retina` are macOS-only for now.
-> Everything else is cross-platform.
+> **Cross-platform**: resizing uses `sips` on macOS and ImageMagick everywhere
+> else. Install ImageMagick on Linux and `--width`, JPEG, and `--avif` all work.
 
 ## Usage
 
 ```bash
 squish image.png                          # → image.png (URL-safe slug name)
+squish photo.jpg                           # JPG in, JPG out (progressive, tuned)
 squish image.png -w 400                    # resize to 400px wide, then compress
 squish image.png --retina --display 200    # 2× of a 200px display size → 400px
-squish image.png --webp                    # also write a .webp sibling
+squish image.png --webp --avif             # also write .webp and .avif siblings
 squish *.png -w 400 --out-dir dist         # batch into ./dist/
+squish assets/*.png --dry-run              # preview names/sizes, write nothing
 squish photo.jpg --ai                      # AI: suggest name / alt / params / html
 squish arc.png --ai --context email-signature --apply
 ```
 
 The output shows, per file: before→after dimensions, a savings bar, the byte
-sizes, the `.webp` if any, and a final total. Color turns off automatically when
-piped or in CI.
+sizes, any `.webp`/`.avif` siblings, and a final total. Color turns off
+automatically when piped or in CI.
+
+### Formats
+
+| Input | Output | Engine |
+|-------|--------|--------|
+| PNG | PNG (keeps alpha) | pngquant + oxipng |
+| JPG / JPEG | JPG (progressive) | ImageMagick |
+| any of the above | `.webp` sibling (`--webp`) | cwebp, or ImageMagick |
+| any of the above | `.avif` sibling (`--avif`) | ImageMagick |
 
 ### Options
 
@@ -92,8 +105,11 @@ piped or in CI.
 | `-w, --width N`     | Resize to N px wide (keeps aspect ratio). **The biggest win** — ship at ~2× display size. Never upscales past the source. |
 | `-r, --retina`      | With `--display`, targets 2× that width. Shorthand for `--width`. |
 | `--display N`       | Intended on-screen width (px). With `--retina`, resizes to `2×N`. |
-| `-c, --colors N`    | Palette size (default 128). Lower = smaller & more banding. 128 ≈ no visible loss; 64 = aggressive. |
+| `-c, --colors N`    | PNG palette size (default 128). Lower = smaller & more banding. 128 ≈ no visible loss; 64 = aggressive. |
+| `--jpeg-quality N`  | JPEG output quality 1–100 (default 82). |
 | `--webp`            | Also emit a `.webp` (~40% smaller). Needs a `<picture>` fallback — Outlook can't read WebP. |
+| `--avif`            | Also emit an `.avif` (~50% smaller). Needs ImageMagick built with AVIF support. |
+| `--dry-run`         | Print what would happen (names, sizes) without writing any file. |
 | `-d, --out-dir DIR` | Write all outputs into DIR (created if missing). |
 | `-o, --output F`    | Explicit output path (single input; overrides naming). |
 | `--name-as WHAT`    | How to name outputs (see below). Default: `slug`. |
@@ -189,12 +205,39 @@ Real example: a 1016 KB / 1154px asset → **40 KB** at `-w 400` (−96%).
 
 ## How it works
 
-1. Optional resize with `sips` (never upscales).
-2. Lossy palette quantization with `pngquant` (keeps alpha, strips metadata).
-3. Lossless recompression with `oxipng -o max`.
-4. Optional WebP sibling with `cwebp`.
-5. Optional AI pass: sends the resized image to the vision model with a strict
+1. Optional resize (`sips` on macOS, ImageMagick elsewhere) — never upscales.
+2. Compress by format: PNG via `pngquant` (palette, keeps alpha) + `oxipng -o max`
+   (lossless); JPEG via ImageMagick (progressive, tuned quality).
+3. Optional `.webp` / `.avif` siblings.
+4. Optional AI pass: sends the resized image to the vision model with a strict
    JSON schema and prints the suggestions.
+
+## Use in CI (GitHub Action)
+
+Optimize images automatically in pull requests:
+
+```yaml
+- uses: cesaramirez/squish@v0.1.0
+  with:
+    files: "assets/**/*.png"
+    webp: "true"
+```
+
+See [docs/USING_THE_ACTION.md](docs/USING_THE_ACTION.md) for a full workflow.
+
+## Install via Homebrew
+
+```bash
+brew install cesaramirez/tap/squish
+```
+
+See [docs/HOMEBREW.md](docs/HOMEBREW.md) for tap setup.
+
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). CI runs
+ShellCheck and a [bats](https://github.com/bats-core/bats-core) test suite on
+every push.
 
 ## License
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-# squish.sh — Optimize images (PNG/JPG), with optional AI analysis.
+# squish.sh — Optimize images (PNG / JPG), with optional AI analysis.
 #
-# Applies lossy palette quantization (pngquant) + lossless recompression (oxipng),
-# preserving transparency. Output stays PNG for maximum compatibility, with an
-# optional WebP sibling. Optionally uses Claude vision to suggest a semantic name,
-# alt text, optimal parameters, and a ready-to-paste HTML snippet.
+# PNG  -> pngquant (palette) + oxipng (lossless), transparency preserved.
+# JPEG -> ImageMagick (progressive, tuned quality).
+# Optional WebP and AVIF siblings. Optionally uses vision AI (OpenAI or Claude)
+# to suggest a semantic name, alt text, optimal params, and an HTML snippet.
+# Cross-platform: uses sips on macOS, ImageMagick elsewhere.
 #
 # Usage:
 #   ./squish.sh input.png [output.png]
@@ -21,9 +22,12 @@
 #                      Ship an image at ~2x its display size. Never upscales.
 #   -r, --retina       With --display, targets 2x that width. Shorthand for --width.
 #       --display N    Intended display width in px; with --retina resizes to 2*N.
-#   -c, --colors N     Palette size (default: 128). Lower = smaller & more banding.
+#   -c, --colors N     PNG palette size (default: 128). Lower = smaller & more banding.
 #                      128 ≈ no visible loss at display size. 64 = aggressive.
+#       --jpeg-quality N  JPEG output quality 1-100 (default: 82).
 #       --webp         Also emit a .webp sibling (~40% smaller; needs <picture> fallback).
+#       --avif         Also emit a .avif sibling (~50% smaller; needs ImageMagick w/ AVIF).
+#       --dry-run      Show what would happen (names, sizes) without writing files.
 #   -d, --out-dir DIR  Write all outputs into DIR (created if missing).
 #   -o, --output FILE  Output path (single input only; overrides all naming below).
 #       --name-as WHAT How to name outputs (default: slug):
@@ -51,8 +55,8 @@
 #   -q, --quiet        Only print the per-file result lines.
 #   -h, --help         Show this help.
 #
-# Requires: pngquant, oxipng. Optional: sips (--width/--retina, ships with macOS),
-#           cwebp (--webp, `brew install webp`), curl + jq (--ai).
+# Requires: pngquant, oxipng. Optional: sips (macOS) or imagemagick (resize, JPEG,
+#           AVIF, cross-platform); cwebp (--webp); curl + jq (--ai).
 # AI keys:  set OPENAI_API_KEY or ANTHROPIC_API_KEY for --ai (auto-detected).
 
 set -euo pipefail
@@ -62,6 +66,9 @@ WIDTH=0
 DISPLAY=0
 RETINA=0
 WEBP=0
+AVIF=0                # also emit an .avif sibling
+JPEG_QUALITY=82       # quality for JPEG output (mozjpeg/magick)
+DRY_RUN=0             # preview actions without writing files
 OUT_DIR=""
 OUTPUT=""
 NAME_AS="slug"        # slug | optimized | plain | retina | width  (default: slug, URL-safe)
@@ -102,6 +109,9 @@ while [[ $# -gt 0 ]]; do
         --display) DISPLAY="${2:?}"; shift 2 ;;
     -c|--colors)   COLORS="${2:?}"; shift 2 ;;
         --webp)    WEBP=1; shift ;;
+        --avif)    AVIF=1; shift ;;
+        --jpeg-quality) JPEG_QUALITY="${2:?}"; shift 2 ;;
+        --dry-run) DRY_RUN=1; shift ;;
     -d|--out-dir)  OUT_DIR="${2:?}"; shift 2 ;;
     -o|--output)   OUTPUT="${2:?}"; shift 2 ;;
         --name-as) NAME_AS="${2:?}"; shift 2 ;;
@@ -144,10 +154,32 @@ case "$CONTEXT" in general|email-signature|web|hero|icon|avatar) ;; *) die "--co
 (( APPLY )) && [[ ${#INPUTS[@]} -gt 1 ]] && die "--apply can't be used with multiple inputs (each name would collide)"
 
 # --- deps ---------------------------------------------------------------------
-command -v pngquant >/dev/null 2>&1 || die "pngquant not found. Run: ${BOLD}brew install pngquant${RESET}"
-command -v oxipng   >/dev/null 2>&1 || die "oxipng not found. Run: ${BOLD}brew install oxipng${RESET}"
-(( WIDTH > 0 )) && ! command -v sips  >/dev/null 2>&1 && die "sips not found (needed for --width/--retina)"
-(( WEBP  > 0 )) && ! command -v cwebp >/dev/null 2>&1 && die "cwebp not found (needed for --webp). Run: ${BOLD}brew install webp${RESET}"
+# Image engines: sips (macOS, no deps) and/or ImageMagick (cross-platform).
+HAVE_SIPS=0;   command -v sips  >/dev/null 2>&1 && HAVE_SIPS=1
+HAVE_MAGICK=0; command -v magick >/dev/null 2>&1 && HAVE_MAGICK=1
+# Optional per-feature tools.
+HAVE_PNGQUANT=0; command -v pngquant >/dev/null 2>&1 && HAVE_PNGQUANT=1
+HAVE_OXIPNG=0;   command -v oxipng   >/dev/null 2>&1 && HAVE_OXIPNG=1
+HAVE_CWEBP=0;    command -v cwebp    >/dev/null 2>&1 && HAVE_CWEBP=1
+
+# PNG optimization needs pngquant + oxipng (the sharpest PNG path). Everything
+# else (JPEG in/out, WebP/AVIF, cross-platform resize) can lean on ImageMagick.
+(( HAVE_PNGQUANT )) || die "pngquant not found. Run: ${BOLD}brew install pngquant${RESET}"
+(( HAVE_OXIPNG ))   || die "oxipng not found. Run: ${BOLD}brew install oxipng${RESET}"
+
+# Resizing: need at least one engine.
+if (( WIDTH > 0 )) && (( ! HAVE_SIPS )) && (( ! HAVE_MAGICK )); then
+  die "resizing (--width/--retina) needs sips (macOS) or ImageMagick. Run: ${BOLD}brew install imagemagick${RESET}"
+fi
+# WebP: cwebp preferred, else ImageMagick.
+if (( WEBP )) && (( ! HAVE_CWEBP )) && (( ! HAVE_MAGICK )); then
+  die "--webp needs cwebp or ImageMagick. Run: ${BOLD}brew install webp${RESET}"
+fi
+# AVIF: ImageMagick only (must be built with libaom/libheif).
+if (( AVIF )) && (( ! HAVE_MAGICK )); then
+  die "--avif needs ImageMagick (with AVIF support). Run: ${BOLD}brew install imagemagick${RESET}"
+fi
+[[ "$JPEG_QUALITY" =~ ^[0-9]+$ ]] && (( JPEG_QUALITY >= 1 && JPEG_QUALITY <= 100 )) || die "--jpeg-quality must be 1..100"
 
 # --ai degrades gracefully: warn once and disable rather than aborting the run.
 # Resolves provider + key + default model. Sets AI_KEY for ai_analyze to use.
@@ -180,6 +212,11 @@ fi
 [[ -n "$OUT_DIR" ]] && mkdir -p "$OUT_DIR"
 
 # --- helpers ------------------------------------------------------------------
+# Cross-platform file size in bytes (BSD/macOS `stat -f%z` vs GNU/Linux `stat -c%s`).
+filesize() {
+  stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
+}
+
 human() { # bytes -> human readable, fixed width
   local b=$1
   if   (( b >= 1048576 )); then printf '%.1f MB' "$(echo "$b/1048576" | bc -l)"
@@ -187,12 +224,33 @@ human() { # bytes -> human readable, fixed width
   else printf '%d B' "$b"; fi
 }
 
-pct_saved() { # in out -> integer percent saved (rounded)
-  echo "scale=4; r=(1 - $2/$1) * 100; scale=0; (r+0.5)/1" | bc -l
+pct_saved() { # in out -> integer percent saved (rounded). Guards divide-by-zero.
+  local in="$1" out="$2"
+  (( in == 0 )) && { echo 0; return; }
+  echo "scale=4; r=(1 - $out/$in) * 100; scale=0; (r+0.5)/1" | bc -l
 }
 
+# --- image engine (cross-platform) --------------------------------------------
+# Prefer sips on macOS (fast, no deps); fall back to ImageMagick everywhere else.
+# HAVE_SIPS / HAVE_MAGICK are resolved once at startup (see deps section).
 dims_of() { # file -> "WxH" or ""
-  sips -g pixelWidth -g pixelHeight "$1" 2>/dev/null | awk '/pixel/{print $2}' | paste -sd'x' - 2>/dev/null
+  if (( HAVE_SIPS )); then
+    sips -g pixelWidth -g pixelHeight "$1" 2>/dev/null | awk '/pixel/{print $2}' | paste -sd'x' - 2>/dev/null
+  elif (( HAVE_MAGICK )); then
+    magick identify -format '%wx%h' "$1[0]" 2>/dev/null
+  fi
+}
+
+# resize_to WIDTH SRC DST -> 0 on success. Never called when WIDTH >= source width.
+resize_to() {
+  local w="$1" src="$2" dst="$3"
+  if (( HAVE_SIPS )); then
+    sips --resampleWidth "$w" "$src" --out "$dst" >/dev/null 2>&1
+  elif (( HAVE_MAGICK )); then
+    magick "$src" -resize "${w}x" "$dst" 2>/dev/null
+  else
+    return 1
+  fi
 }
 
 # 12-wide bar; more green = more saved. Uses gradient thresholds.
@@ -207,6 +265,31 @@ savings_bar() {
     if (( i < filled )); then out+="${color}█${RESET}"; else out+="${GRAY}░${RESET}"; fi
   done
   printf '%s' "$out"
+}
+
+# --- format helpers -----------------------------------------------------------
+# lowercased extension of a path
+ext_of() { printf '%s' "${1##*.}" | tr '[:upper:]' '[:lower:]'; }
+
+# Logical kind of an image by extension: png | jpeg | webp | other.
+img_kind() {
+  case "$(ext_of "$1")" in
+    png)      printf 'png' ;;
+    jpg|jpeg) printf 'jpeg' ;;
+    webp)     printf 'webp' ;;
+    gif)      printf 'gif' ;;
+    avif)     printf 'avif' ;;
+    *)        printf 'other' ;;
+  esac
+}
+
+# Output extension for a source: JPEG stays .jpg, everything else normalizes to
+# .png (our lossless-with-alpha default). WebP/AVIF are emitted as siblings.
+out_ext_for() {
+  case "$(img_kind "$1")" in
+    jpeg) printf 'jpg' ;;
+    *)    printf 'png' ;;
+  esac
 }
 
 # --- AI (Claude vision) -------------------------------------------------------
@@ -319,6 +402,44 @@ ai_analyze() {
 TOTAL_IN=0 TOTAL_OUT=0 OK_COUNT=0 FAIL_COUNT=0
 AI_JSON=""   # per-file AI result, consumed by dest_for/reporting
 
+# Compress WORK into DST, picking the path by output extension.
+#   PNG  -> pngquant (palette) + oxipng (lossless)
+#   JPEG -> ImageMagick with mozjpeg-style settings at $JPEG_QUALITY
+compress_to() {
+  local work="$1" dst="$2" tmp="$3"
+  case "$(ext_of "$dst")" in
+    jpg|jpeg)
+      # ImageMagick: strip metadata, progressive, quality-controlled JPEG.
+      magick "$work" -strip -interlace Plane -sampling-factor 4:2:0 \
+        -quality "$JPEG_QUALITY" "$dst" 2>/dev/null
+      ;;
+    *)
+      # PNG path: lossy palette then lossless recompress.
+      if ! pngquant --strip --skip-if-larger --force \
+            --quality=70-95 --output "$tmp" "$COLORS" -- "$work" 2>/dev/null; then
+        cp -- "$work" "$tmp"
+      fi
+      oxipng -o max --strip all --quiet "$tmp" --out "$dst" 2>/dev/null
+      ;;
+  esac
+}
+
+# Emit a WebP sibling of DST from WORK. Prefers cwebp, falls back to magick.
+make_webp() {
+  local work="$1" out="$2"
+  if (( HAVE_CWEBP )); then
+    cwebp -quiet -q 90 -alpha_q 100 "$work" -o "$out" 2>/dev/null
+  else
+    magick "$work" -quality 90 "$out" 2>/dev/null
+  fi
+}
+
+# Emit an AVIF sibling of DST from WORK (ImageMagick only).
+make_avif() {
+  local work="$1" out="$2"
+  magick "$work" -quality 55 "$out" 2>/dev/null
+}
+
 optimize_one() {
   local src="$1" dst="$2"
   if [[ ! -f "$src" ]]; then
@@ -326,7 +447,8 @@ optimize_one() {
     (( FAIL_COUNT++ )); return 1
   fi
 
-  local tmp resized; tmp="$(mktemp -t squish.XXXXXX).png"; resized="$(mktemp -t squish.XXXXXX).png"
+  local ext; ext="$(ext_of "$dst")"
+  local tmp resized; tmp="$(mktemp -t squish.XXXXXX).${ext}"; resized="$(mktemp -t squish.XXXXXX).${ext}"
   trap 'rm -f "$tmp" "$resized"' RETURN
 
   local in_dims out_dims resize_note=""
@@ -337,8 +459,7 @@ optimize_one() {
   if (( WIDTH > 0 )); then
     local srcw="${in_dims%%x*}"
     if [[ -n "$srcw" ]] && (( WIDTH < srcw )); then
-      sips --resampleWidth "$WIDTH" "$src" --out "$resized" >/dev/null 2>&1
-      work="$resized"
+      resize_to "$WIDTH" "$src" "$resized" && work="$resized"
     else
       resize_note=" ${DIM}(already ≤ ${WIDTH}px, kept)${RESET}"
     fi
@@ -355,16 +476,22 @@ optimize_one() {
     fi
   fi
 
-  # 1) lossy palette quantization; fall back to input if it can't win.
-  if ! pngquant --strip --skip-if-larger --force \
-        --quality=70-95 --output "$tmp" "$COLORS" -- "$work" 2>/dev/null; then
-    cp -- "$work" "$tmp"
+  # --- dry-run: report what WOULD happen, write nothing. ----------------------
+  if (( DRY_RUN )); then
+    local extras=""
+    (( WEBP )) && extras+=" +webp"
+    (( AVIF )) && extras+=" +avif"
+    printf '%s◐%s %s%s%s %s→%s %s%s%s  %s%s%s%s\n' \
+      "$YELLOW" "$RESET" "$DIM" "$(basename "$src")" "$RESET" \
+      "$GRAY" "$RESET" "$BOLD" "$(basename "$dst")" "$RESET" \
+      "$GRAY" "${in_dims}px${extras}" "$RESET" "$resize_note"
+    (( OK_COUNT++ )); note ""; return 0
   fi
 
-  # 2) lossless recompression -> final PNG
-  oxipng -o max --strip all --quiet "$tmp" --out "$dst" 2>/dev/null
+  # 1+2) compress into the final file (format-aware).
+  compress_to "$work" "$dst" "$tmp"
 
-  local in_b out_b pct; in_b=$(stat -f%z "$src"); out_b=$(stat -f%z "$dst")
+  local in_b out_b pct; in_b=$(filesize "$src"); out_b=$(filesize "$dst")
   out_dims="$(dims_of "$dst")"
   pct=$(pct_saved "$in_b" "$out_b")
 
@@ -387,13 +514,20 @@ optimize_one() {
     "$BOLD$GREEN" "$(human "$out_b")" "$RESET" \
     "$GREEN" "$pct" "$RESET"
 
-  # 3) optional WebP sibling — 'png' label + size aligned under the PNG output column
+  # 3) optional modern-format siblings (WebP / AVIF), size aligned under the output column
   if (( WEBP )); then
-    local webp="${dst%.*}.webp"
-    cwebp -quiet -q 90 -alpha_q 100 "$work" -o "$webp" 2>/dev/null
-    local w_b wpct; w_b=$(stat -f%z "$webp"); wpct=$(pct_saved "$in_b" "$w_b")
+    local webp="${dst%.*}.webp" w_b wpct
+    make_webp "$work" "$webp"
+    w_b=$(filesize "$webp"); wpct=$(pct_saved "$in_b" "$w_b")
     printf '   %s└─ also .webp%s   %s→ %s%-9s%s  %s−%s%%%s\n' \
       "$GRAY" "$RESET" "$DIM" "$BOLD$CYAN" "$(human "$w_b")" "$RESET" "$CYAN" "$wpct" "$RESET"
+  fi
+  if (( AVIF )); then
+    local avif="${dst%.*}.avif" a_b apct
+    make_avif "$work" "$avif"
+    a_b=$(filesize "$avif"); apct=$(pct_saved "$in_b" "$a_b")
+    printf '   %s└─ also .avif%s   %s→ %s%-9s%s  %s−%s%%%s\n' \
+      "$GRAY" "$RESET" "$DIM" "$BOLD$CYAN" "$(human "$a_b")" "$RESET" "$CYAN" "$apct" "$RESET"
   fi
 
   # 4) AI suggestions block
@@ -455,13 +589,13 @@ dest_for() {
   local src="$1"
   # --output wins outright (explicit single path).
   [[ -n "$OUTPUT" ]] && { printf '%s' "$OUTPUT"; return; }
-  local stem dir dst; stem="$(build_stem "$src")"
+  local stem dir dst ext; stem="$(build_stem "$src")"; ext="$(out_ext_for "$src")"
   if [[ -n "$OUT_DIR" ]]; then dir="$OUT_DIR"; else dir="$(dirname "$src")"; fi
-  dst="$dir/$stem.png"
+  dst="$dir/$stem.$ext"
   # Safety: never overwrite the source in place. If names collide (e.g. slug of an
   # already-clean name in the same dir), append -min so the original survives.
-  if [[ "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" == "$(cd "$dir" 2>/dev/null && pwd)/$stem.png" ]]; then
-    dst="$dir/$stem-min.png"
+  if [[ "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" == "$(cd "$dir" 2>/dev/null && pwd)/$stem.$ext" ]]; then
+    dst="$dir/$stem-min.$ext"
   fi
   printf '%s' "$dst"
 }
@@ -474,7 +608,9 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
   cfg+="pngquant ${COLORS}c · oxipng max"
   (( WIDTH > 0 )) && cfg+=" · resize ${WIDTH}px"
   (( WEBP  > 0 )) && cfg+=" · +webp"
+  (( AVIF  > 0 )) && cfg+=" · +avif"
   (( AI    > 0 )) && cfg+=" · 🧠 ai ${AI_PROVIDER}/${CONTEXT}"
+  (( DRY_RUN > 0 )) && cfg+=" · ${YELLOW}dry-run${GRAY}"
   cfg+="${RESET}"
   note "  $cfg"
   note ""

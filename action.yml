@@ -1,0 +1,100 @@
+name: "squish"
+description: "Optimize images (resize + compress) with squish"
+author: "César"
+
+branding:
+  icon: "image"
+  color: "green"
+
+inputs:
+  files:
+    description: "Glob of images to optimize (uses bash globstar/nullglob)."
+    required: false
+    default: "**/*.png"
+  width:
+    description: "Optional resize width in px; passed as -w if set."
+    required: false
+    default: ""
+  webp:
+    description: "If 'true', also emit .webp siblings (--webp)."
+    required: false
+    default: "false"
+  avif:
+    description: "If 'true', also emit .avif siblings (--avif)."
+    required: false
+    default: "false"
+  args:
+    description: "Extra raw args passed through to squish."
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        sudo apt-get install -y pngquant imagemagick webp
+
+        # Install oxipng from the latest GitHub release (linux x86_64).
+        OXIPNG_VERSION="9.1.5"
+        TAG=$(curl -fsSL "https://api.github.com/repos/oxipng/oxipng/releases/latest" \
+          | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' \
+          | head -n1 | grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' || true)
+        if [ -n "${TAG:-}" ]; then
+          OXIPNG_VERSION="${TAG#v}"
+        fi
+
+        TMP="$(mktemp -d)"
+        URL="https://github.com/oxipng/oxipng/releases/download/v${OXIPNG_VERSION}/oxipng-${OXIPNG_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        echo "Downloading oxipng ${OXIPNG_VERSION} from ${URL}"
+        curl -fsSL "$URL" -o "$TMP/oxipng.tar.gz"
+        tar -xzf "$TMP/oxipng.tar.gz" -C "$TMP"
+        OXIPNG_BIN="$(find "$TMP" -type f -name oxipng | head -n1)"
+        sudo mv "$OXIPNG_BIN" /usr/local/bin/oxipng
+        sudo chmod +x /usr/local/bin/oxipng
+        rm -rf "$TMP"
+        oxipng --version
+
+    - name: Run squish
+      shell: bash
+      env:
+        FILES: ${{ inputs.files }}
+        WIDTH: ${{ inputs.width }}
+        WEBP: ${{ inputs.webp }}
+        AVIF: ${{ inputs.avif }}
+        EXTRA_ARGS: ${{ inputs.args }}
+      run: |
+        set -euo pipefail
+        shopt -s globstar nullglob
+
+        # Build the squish argument list from inputs.
+        SQUISH_ARGS=()
+        if [ -n "${WIDTH:-}" ]; then
+          SQUISH_ARGS+=(-w "$WIDTH")
+        fi
+        if [ "${WEBP:-false}" = "true" ]; then
+          SQUISH_ARGS+=(--webp)
+        fi
+        if [ "${AVIF:-false}" = "true" ]; then
+          SQUISH_ARGS+=(--avif)
+        fi
+        if [ -n "${EXTRA_ARGS:-}" ]; then
+          # shellcheck disable=SC2206
+          SQUISH_ARGS+=($EXTRA_ARGS)
+        fi
+
+        # Expand the files glob.
+        matches=($FILES)
+        if [ "${#matches[@]}" -eq 0 ]; then
+          echo "No files matched glob: $FILES"
+          exit 0
+        fi
+
+        echo "Optimizing ${#matches[@]} file(s) with args: ${SQUISH_ARGS[*]:-<none>}"
+        for f in "${matches[@]}"; do
+          echo "==> $f"
+          bash "${{ github.action_path }}/squish.sh" "$f" "${SQUISH_ARGS[@]}"
+        done

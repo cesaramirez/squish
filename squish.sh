@@ -168,7 +168,6 @@ load_squishrc() {
     val="${val#"${val%%[![:space:]]*}"}"        # ltrim val
     apply_rc_key "$key" "$val" "$lineno"
   done < "$rc"
-  # shellcheck disable=SC2034  # read by future consumers (e.g. verbose/banner output)
   RC_LOADED=1
 }
 
@@ -862,6 +861,7 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
     else cfg+=" · 🧠 ai ${AI_PROVIDER}/${CONTEXT}"; fi
   fi
   (( DRY_RUN > 0 )) && cfg+=" · ${YELLOW}dry-run${GRAY}"
+  (( RC_LOADED )) && cfg+=" · ${DIM}⚙ .squishrc${GRAY}"
   cfg+="${RESET}"
   note "  $cfg"
   note ""

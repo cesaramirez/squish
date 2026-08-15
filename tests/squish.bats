@@ -323,3 +323,16 @@ setup() {
   [[ "$output" == *"auto (local)"* ]]   # AI path ran (local, no key)
   [ -f "$out" ]                          # wrote to the explicit --output, no AI rename
 }
+
+@test "squishrc: banner shows the .squishrc marker only when a file was read" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  # No file: no marker.
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [[ "$output" != *".squishrc"* ]]
+  # With a file: marker present.
+  printf 'colors=64\n' > .squishrc
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [[ "$output" == *".squishrc"* ]]
+}

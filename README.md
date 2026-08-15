@@ -217,7 +217,7 @@ Real example: a 1016 KB / 1154px asset → **40 KB** at `-w 400` (−96%).
 Optimize images automatically in pull requests:
 
 ```yaml
-- uses: cesaramirez/squish@v0.1.0
+- uses: cesaramirez/squish@v0.2.0
   with:
     files: "assets/**/*.png"
     webp: "true"

@@ -63,6 +63,11 @@
 
 set -euo pipefail
 
+if (( BASH_VERSINFO[0] < 4 )); then
+  printf 'squish requires bash 4 or newer (found %s). On macOS: brew install bash.\n' "${BASH_VERSION}" >&2
+  exit 1
+fi
+
 COLORS=128
 WIDTH=0
 DISPLAY=0
@@ -344,7 +349,7 @@ analyze_local() {
 
   # Helper: compute mean edge magnitude in [0,1]; low = smooth (gradient), high = detailed.
   edge_density() {
-    local img="$1" tmp mean
+    local img="$1" tmp mean=0
     tmp="$(mktemp -t squish-edge.XXXXXX.png)" || tmp="/tmp/squish-edge-$$-$RANDOM.png"
     if magick "${img}[0]" -colorspace Gray -edge 1 "$tmp" 2>/dev/null; then
       mean="$(magick identify -format '%[fx:mean]' "$tmp" 2>/dev/null)"
@@ -529,6 +534,7 @@ ai_analyze() {
 
 # --- state --------------------------------------------------------------------
 TOTAL_IN=0 TOTAL_OUT=0 OK_COUNT=0 FAIL_COUNT=0
+# Requires bash 4+ (associative arrays); guarded near top of script.
 declare -A TAKEN=()   # destination paths already claimed this run
 AI_JSON=""   # per-file AI result, consumed by dest_for/reporting
 

@@ -583,3 +583,37 @@ setup() {
   [ "$elapsed" -lt 3 ]
   grep -q "stopped watching" "$log"
 }
+
+@test "watch: --out-dir with a trailing slash nested in a watched tree does not run away" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root"
+  magick -size 40x40 xc:red "$root/logo.png"
+  # trailing slash on --out-dir, out-dir nested inside the watched -R tree
+  WATCH_INTERVAL=1 bash "$SQUISH" "$root" -R --watch --out-dir "$root/dist/" --no-color >/dev/null 2>&1 &
+  pid=$!
+  sleep 5
+  kill "$pid" 2>/dev/null
+  # No runaway nesting: dist/dist must never be created.
+  [ ! -e "$root/dist/dist" ]
+  # And the legit output exists exactly once.
+  [ -f "$root/dist/logo.png" ]
+}
+
+@test "watch: SIGTERM kills the backgrounded sleep, none lingers after exit" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w5"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/e.png"
+  WATCH_INTERVAL=20 bash "$SQUISH" "$work/e.png" --watch --no-color >/dev/null 2>&1 &
+  pid=$!
+  sleep 1
+  # Find the sleep child before killing the parent.
+  sleep_pid="$(pgrep -P "$pid" -f 'sleep 20' 2>/dev/null || true)"
+  kill -TERM "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  sleep 0.5
+  # The sleep child must not still be alive (reparented or otherwise).
+  if [ -n "$sleep_pid" ]; then
+    run kill -0 "$sleep_pid"
+    [ "$status" -ne 0 ]
+  fi
+}

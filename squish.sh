@@ -231,6 +231,7 @@ discover_images() {
 # (requires -R). Records each discovered file's walk root in WALK_ROOT so
 # dest_for can mirror the tree under --out-dir. Files pass through unchanged.
 expand_inputs() {
+  WALK_ROOT=()   # rebuilt fresh each call; stale keys must not accumulate across watch ticks
   local expanded=() item f found
   for item in "${INPUTS[@]}"; do
     if [[ -d "$item" ]]; then
@@ -263,6 +264,11 @@ fi
 [[ "$WIDTH" =~ ^[0-9]+$ ]] || die "--width must be a positive integer"
 [[ -n "$OUTPUT" && ${#INPUTS[@]} -gt 1 ]] && die "--output can't be used with multiple inputs"
 [[ -n "$OUTPUT" && -n "$OUT_DIR" ]] && die "use either --output or --out-dir, not both"
+# Normalize away any trailing slash so composed dst paths (dest_for) always match the
+# single-slash paths `find`/discover_images report — a trailing slash would otherwise
+# produce a "dir//file" key that the watch anti-loop GENERATED filter can't match,
+# causing generated outputs to be re-discovered as new sources (unbounded runaway).
+[[ -n "$OUT_DIR" ]] && OUT_DIR="${OUT_DIR%/}"
 case "$NAME_AS" in optimized|plain|slug|retina|width) ;; *) die "--name-as must be one of: optimized, plain, slug, retina, width" ;; esac
 [[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
 RAW_INPUTS=("${INPUTS[@]}")   # snapshot before flattening, so --watch can re-walk directories
@@ -980,10 +986,12 @@ run_watch() {
   for f in "${!TAKEN[@]}"; do GENERATED["$f"]=1; done
   for f in "${INPUTS[@]}"; do STAMP["$f"]="$(file_stamp "$f")"; done
   note "${DIM}watching ${#INPUTS[@]} source(s) — Ctrl-C to stop${RESET}"
-  trap 'note ""; note "${GREEN}✓${RESET} stopped watching"; exit 0' INT TERM
+  local _sleep_pid=""
+  trap 'kill "$_sleep_pid" 2>/dev/null; note ""; note "${GREEN}✓${RESET} stopped watching"; exit 0' INT TERM
 
   while true; do
-    sleep "${WATCH_INTERVAL:-2}" & wait "$!" || true
+    sleep "${WATCH_INTERVAL:-2}" & _sleep_pid=$!
+    wait "$_sleep_pid" || true
     INPUTS=("${ORIG_INPUTS[@]}")            # reset before re-discovery
     expand_inputs                          # re-walk directories (picks up new files)
     local candidates=() changed=() cur
@@ -991,7 +999,9 @@ run_watch() {
       [[ -n "${GENERATED[$f]:-}" ]] && continue   # our own output; never a source
       candidates+=("$f")
     done
-    INPUTS=("${candidates[@]}")
+    # Guard against expanding an empty array under `set -u` on bash 4.0-4.3, where
+    # "${candidates[@]}" on an empty array is an unset-variable error (fixed in 4.4+).
+    if (( ${#candidates[@]} )); then INPUTS=("${candidates[@]}"); else INPUTS=(); fi
     for f in "${INPUTS[@]}"; do
       cur="$(file_stamp "$f")"
       if [[ "$cur" != "${STAMP[$f]:-}" ]]; then changed+=("$f"); STAMP["$f"]="$cur"; fi

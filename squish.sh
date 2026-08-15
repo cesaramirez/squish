@@ -95,6 +95,7 @@ RC_LOADED=0           # set to 1 when a ./.squishrc was read
 RECURSIVE=0           # -R / --recursive: descend into directory inputs
 declare -A WALK_ROOT=()   # discovered-file -> the directory input it came from
 WATCH=0               # --watch: optimize, then poll sources and re-optimize on change
+declare -a RAW_INPUTS=()  # INPUTS as the user typed them, before expand_inputs flattens dirs
 
 # --- colors -------------------------------------------------------------------
 # Honor NO_COLOR, --no-color, and non-TTY output (pipes, CI) automatically.
@@ -264,6 +265,7 @@ fi
 [[ -n "$OUTPUT" && -n "$OUT_DIR" ]] && die "use either --output or --out-dir, not both"
 case "$NAME_AS" in optimized|plain|slug|retina|width) ;; *) die "--name-as must be one of: optimized, plain, slug, retina, width" ;; esac
 [[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
+RAW_INPUTS=("${INPUTS[@]}")   # snapshot before flattening, so --watch can re-walk directories
 expand_inputs
 [[ -n "$OUTPUT" && ${#INPUTS[@]} -gt 1 ]] && die "--output can't be used with multiple inputs"
 [[ -n "$RENAME" && ${#INPUTS[@]} -gt 1 ]] && die "--rename can't be used with multiple inputs (each would collide)"
@@ -970,19 +972,26 @@ run_pipeline_once() {
 # Snapshot covers only sources (INPUTS), never outputs, so squish's own writes
 # never re-trigger. Ctrl-C / SIGTERM stops cleanly.
 run_watch() {
-  local -a ORIG_INPUTS=("${INPUTS[@]}")   # what the user asked to watch
+  local -a ORIG_INPUTS=("${RAW_INPUTS[@]}")   # directories/files as the user typed them
   declare -A STAMP
-  run_pipeline_once                        # first pass: optimize everything
+  declare -A GENERATED                     # destination paths squish has written; never sources
+  run_pipeline_once                        # first pass: optimize the already-expanded INPUTS
   local f
+  for f in "${!TAKEN[@]}"; do GENERATED["$f"]=1; done
   for f in "${INPUTS[@]}"; do STAMP["$f"]="$(file_stamp "$f")"; done
   note "${DIM}watching ${#INPUTS[@]} source(s) — Ctrl-C to stop${RESET}"
   trap 'note ""; note "${GREEN}✓${RESET} stopped watching"; exit 0' INT TERM
 
   while true; do
-    sleep "${WATCH_INTERVAL:-2}"
+    sleep "${WATCH_INTERVAL:-2}" & wait "$!" || true
     INPUTS=("${ORIG_INPUTS[@]}")            # reset before re-discovery
-    expand_inputs                          # re-discover (new files, recursive)
-    local changed=() cur
+    expand_inputs                          # re-walk directories (picks up new files)
+    local candidates=() changed=() cur
+    for f in "${INPUTS[@]}"; do
+      [[ -n "${GENERATED[$f]:-}" ]] && continue   # our own output; never a source
+      candidates+=("$f")
+    done
+    INPUTS=("${candidates[@]}")
     for f in "${INPUTS[@]}"; do
       cur="$(file_stamp "$f")"
       if [[ "$cur" != "${STAMP[$f]:-}" ]]; then changed+=("$f"); STAMP["$f"]="$cur"; fi
@@ -990,6 +999,7 @@ run_watch() {
     (( ${#changed[@]} )) || continue
     INPUTS=("${changed[@]}")
     run_pipeline_once
+    for f in "${!TAKEN[@]}"; do GENERATED["$f"]=1; done
   done
 }
 

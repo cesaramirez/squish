@@ -542,3 +542,44 @@ setup() {
   [ "$rc" -eq 0 ]
   grep -q "stopped watching" "$log"
 }
+
+@test "watch: -R picks up a file added to a watched directory mid-run" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/wd"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/first.png"
+  WATCH_INTERVAL=1 bash "$SQUISH" "$work" -R --watch --no-color >/dev/null 2>&1 &
+  pid=$!
+  # wait for first pass to optimize the initial file
+  for _ in $(seq 1 12); do [ -f "$work/first-min.png" ] && break; sleep 0.5; done
+  [ -f "$work/first-min.png" ]
+  # drop a NEW file into the watched dir; it must be optimized within a few ticks
+  sleep 1; magick -size 60x60 xc:blue "$work/second.png"
+  found=0
+  for _ in $(seq 1 12); do [ -f "$work/second-min.png" ] && { found=1; break; }; sleep 0.5; done
+  # Anti-loop: give it a few more ticks and confirm the file count stops growing
+  # (the generated *-min.png outputs must never be re-discovered as new sources).
+  sleep 3
+  count_before="$(find "$work" -name '*.png' | wc -l | tr -d ' ')"
+  sleep 2
+  count_after="$(find "$work" -name '*.png' | wc -l | tr -d ' ')"
+  kill "$pid" 2>/dev/null
+  [ "$found" -eq 1 ]
+  [ "$count_before" = "$count_after" ]
+}
+
+@test "watch: SIGTERM interrupts the sleep promptly instead of waiting a full interval" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  work="$BATS_TEST_TMPDIR/w4"; mkdir -p "$work"
+  magick -size 60x60 xc:red "$work/d.png"
+  log="$BATS_TEST_TMPDIR/w4.log"
+  WATCH_INTERVAL=10 bash "$SQUISH" "$work/d.png" --watch >"$log" 2>&1 &
+  pid=$!
+  sleep 1
+  start="$(date +%s)"
+  kill -TERM "$pid" 2>/dev/null
+  wait "$pid"; rc=$?
+  elapsed=$(( $(date +%s) - start ))
+  [ "$rc" -eq 0 ]
+  [ "$elapsed" -lt 3 ]
+  grep -q "stopped watching" "$log"
+}

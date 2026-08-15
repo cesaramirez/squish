@@ -78,3 +78,18 @@ setup() {
   [ -f "$out" ]
   [[ "$output" == *"API key"* || "$stderr" == *"API key"* || "$output" == *"⚠"* ]]
 }
+
+@test "sha256 helper: same bytes give same digest, different bytes differ" {
+  printf 'squish' > "$BATS_TEST_TMPDIR/a"
+  printf 'squish' > "$BATS_TEST_TMPDIR/b"
+  printf 'other'  > "$BATS_TEST_TMPDIR/c"
+  # Extract the sha256 function body and run it standalone.
+  fn="$(sed -n '/^sha256() {/,/^}/p' "$SQUISH")"
+  da="$(bash -c "$fn"$'\n'"sha256 '$BATS_TEST_TMPDIR/a'")"
+  db="$(bash -c "$fn"$'\n'"sha256 '$BATS_TEST_TMPDIR/b'")"
+  dc="$(bash -c "$fn"$'\n'"sha256 '$BATS_TEST_TMPDIR/c'")"
+  [ -n "$da" ]
+  [ "${#da}" -eq 64 ]
+  [ "$da" = "$db" ]
+  [ "$da" != "$dc" ]
+}

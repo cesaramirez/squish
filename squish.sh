@@ -217,6 +217,15 @@ filesize() {
   stat -f%z "$1" 2>/dev/null || stat -c%s "$1" 2>/dev/null || echo 0
 }
 
+# Cross-platform sha256 of a file's bytes (macOS shasum vs Linux sha256sum).
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" 2>/dev/null | cut -d' ' -f1
+  else
+    sha256sum "$1" 2>/dev/null | cut -d' ' -f1
+  fi
+}
+
 human() { # bytes -> human readable, fixed width
   local b=$1
   if   (( b >= 1048576 )); then printf '%.1f MB' "$(echo "$b/1048576" | bc -l)"

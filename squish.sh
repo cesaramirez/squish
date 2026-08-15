@@ -546,10 +546,14 @@ optimize_one() {
   #      the final name is chosen so --apply can rename from the suggestion.
   AI_JSON=""
   if (( AI )); then
-    AI_JSON="$(ai_analyze "$work")" || AI_JSON=""
-    if (( APPLY )) && [[ -n "$AI_JSON" ]]; then
-      local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
-      [[ -n "$ai_name" ]] && dst="$(RENAME="$ai_name" dest_for "$src")"
+    if (( AI_LOCAL )); then
+      AI_JSON="$(analyze_local "$work")" || AI_JSON=""
+    else
+      AI_JSON="$(ai_analyze "$work")" || AI_JSON=""
+      if (( APPLY )) && [[ -n "$AI_JSON" ]]; then
+        local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
+        [[ -n "$ai_name" ]] && dst="$(RENAME="$ai_name" dest_for "$src")"
+      fi
     fi
   fi
 
@@ -609,27 +613,37 @@ optimize_one() {
 
   # 4) AI suggestions block
   if (( AI )) && [[ -n "$AI_JSON" ]] && [[ "$QUIET" -ne 1 ]]; then
-    printf '   %s🧠 AI%s %s(%s · %s)%s\n' "$CYAN" "$RESET" "$DIM" "$AI_MODEL" "$CONTEXT" "$RESET"
-    local v
-    v="$(printf '%s' "$AI_JSON" | jq -r '.name   // empty')"; [[ -n "$v" ]] && printf '      %sname%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$v"
-    printf '%s' "$RESET"
-    v="$(printf '%s' "$AI_JSON" | jq -r '.alt    // empty')"; [[ -n "$v" ]] && printf '      %salt%s    "%s"\n' "$GRAY" "$RESET" "$v"
-    if printf '%s' "$AI_JSON" | jq -e '.kind' >/dev/null 2>&1; then
-      printf '      %sparams%s %s → --colors %s%s\n' "$GRAY" "$RESET" \
-        "$(printf '%s' "$AI_JSON" | jq -r '.kind')" \
+    if (( AI_LOCAL )); then
+      printf '   %s🔍 auto (local)%s\n' "$CYAN" "$RESET"
+      printf '      %skind%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$(printf '%s' "$AI_JSON" | jq -r '.kind')"
+      printf '%s' "$RESET"
+      printf '      %sparams%s → --colors %s%s%s\n' "$GRAY" "$RESET" \
         "$(printf '%s' "$AI_JSON" | jq -r '.suggested_colors')" \
-        "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')"
-    fi
-    v="$(printf '%s' "$AI_JSON" | jq -r '.html   // empty')"
-    if [[ -n "$v" ]]; then
-      printf '      %shtml%s\n' "$GRAY" "$RESET"
-      printf '%s' "$v" | sed "s|SRC|$(basename "$dst")|g; s/^/        /"
-      printf '\n'
-    fi
-    # If not applied, offer the ready command to apply the suggested name.
-    if (( ! APPLY )); then
-      local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
-      [[ -n "$ai_name" ]] && printf '      %sapply%s  squish "%s" --rename %s\n' "$GRAY" "$RESET" "$(basename "$src")" "$ai_name"
+        "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')" \
+        "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_avif then " --avif" else "" end')"
+    else
+      printf '   %s🧠 AI%s %s(%s · %s)%s\n' "$CYAN" "$RESET" "$DIM" "$AI_MODEL" "$CONTEXT" "$RESET"
+      local v
+      v="$(printf '%s' "$AI_JSON" | jq -r '.name   // empty')"; [[ -n "$v" ]] && printf '      %sname%s   %s%s\n' "$GRAY" "$RESET" "$BOLD" "$v"
+      printf '%s' "$RESET"
+      v="$(printf '%s' "$AI_JSON" | jq -r '.alt    // empty')"; [[ -n "$v" ]] && printf '      %salt%s    "%s"\n' "$GRAY" "$RESET" "$v"
+      if printf '%s' "$AI_JSON" | jq -e '.kind' >/dev/null 2>&1; then
+        printf '      %sparams%s %s → --colors %s%s\n' "$GRAY" "$RESET" \
+          "$(printf '%s' "$AI_JSON" | jq -r '.kind')" \
+          "$(printf '%s' "$AI_JSON" | jq -r '.suggested_colors')" \
+          "$(printf '%s' "$AI_JSON" | jq -r 'if .suggest_webp then " --webp" else "" end')"
+      fi
+      v="$(printf '%s' "$AI_JSON" | jq -r '.html   // empty')"
+      if [[ -n "$v" ]]; then
+        printf '      %shtml%s\n' "$GRAY" "$RESET"
+        printf '%s' "$v" | sed "s|SRC|$(basename "$dst")|g; s/^/        /"
+        printf '\n'
+      fi
+      # If not applied, offer the ready command to apply the suggested name.
+      if (( ! APPLY )); then
+        local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
+        [[ -n "$ai_name" ]] && printf '      %sapply%s  squish "%s" --rename %s\n' "$GRAY" "$RESET" "$(basename "$src")" "$ai_name"
+      fi
     fi
   fi
   note ""

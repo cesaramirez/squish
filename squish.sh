@@ -218,7 +218,16 @@ if (( AI )); then
     esac
     if [[ -z "$AI_KEY" ]]; then
       # No key: fall back to local heuristic analysis instead of disabling --ai.
-      AI_LOCAL=1; APPLY=0
+      # The local heuristic is ImageMagick-only (analyze_local calls magick). If
+      # magick is absent (e.g. a sips-only macOS box), warn and disable rather
+      # than silently misclassifying every image as "gradient".
+      if (( HAVE_MAGICK )); then
+        AI_LOCAL=1; APPLY=0
+      else
+        printf '%s⚠%s --ai without a key needs ImageMagick for local analysis; skipping. Run: %sbrew install imagemagick%s\n' \
+          "${YELLOW}" "${RESET}" "${BOLD}" "${RESET}" >&2
+        AI=0; APPLY=0
+      fi
     fi
   fi
 fi
@@ -377,7 +386,7 @@ analyze_local() {
     local edges
     edges="$(edge_density "$src")"
     # mean edge magnitude in [0,1]; gradients measure < 0.015, detailed images above.
-    if awk "BEGIN{exit !($edges < 0.015)}"; then
+    if awk -v e="$edges" 'BEGIN{exit !(e < 0.015)}'; then
       kind="gradient"
     else
       kind="photo"
@@ -388,7 +397,7 @@ analyze_local() {
     local edges
     edges="$(edge_density "$src")"
     # mean edge magnitude in [0,1]; gradients measure < 0.015, detailed images above.
-    if awk "BEGIN{exit !($edges < 0.015)}"; then
+    if awk -v e="$edges" 'BEGIN{exit !(e < 0.015)}'; then
       kind="gradient"
     else
       kind="illustration"
@@ -483,12 +492,13 @@ ai_openai() {
 # --- AI result cache ----------------------------------------------------------
 ai_cache_dir() { printf '%s/squish' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
 
-# Cache key: sha of (file-sha + model + context + fields), so any of them
-# changing regenerates. Uses a temp file because sha256 reads a file.
+# Cache key: sha of (file-sha + provider + model + context + fields), so any of
+# them changing regenerates. Provider is part of the material because two
+# providers can share a model name and produce different results.
 ai_cache_key() {
   local fsha material
   fsha="$(sha256 "$1")"
-  material="${fsha}-${AI_MODEL}-${CONTEXT}-${AI_FIELDS}"
+  material="${fsha}-${AI_PROVIDER}-${AI_MODEL}-${CONTEXT}-${AI_FIELDS}"
   if command -v shasum >/dev/null 2>&1; then
     printf '%s' "$material" | shasum -a 256 | cut -d' ' -f1
   else
@@ -611,7 +621,14 @@ optimize_one() {
       AI_JSON="$(ai_analyze "$work")" || AI_JSON=""
       if (( APPLY )) && [[ -n "$AI_JSON" ]]; then
         local ai_name; ai_name="$(printf '%s' "$AI_JSON" | jq -r '.name // empty')"
-        [[ -n "$ai_name" ]] && dst="$(RENAME="$ai_name" dest_for "$src")"
+        if [[ -n "$ai_name" ]]; then
+          # Release the pre-rename claim (made by the run loop) and re-claim the
+          # AI-suggested destination, so a later file colliding on the same
+          # AI name gets a -2 suffix instead of silently overwriting this one.
+          unset "TAKEN[$dst]"
+          dst="$(RENAME="$ai_name" dest_for "$src")"
+          TAKEN[$dst]=1
+        fi
       fi
     fi
   fi
@@ -770,7 +787,10 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
   (( WIDTH > 0 )) && cfg+=" · resize ${WIDTH}px"
   (( WEBP  > 0 )) && cfg+=" · +webp"
   (( AVIF  > 0 )) && cfg+=" · +avif"
-  (( AI    > 0 )) && cfg+=" · 🧠 ai ${AI_PROVIDER}/${CONTEXT}"
+  if (( AI > 0 )); then
+    if (( AI_LOCAL )); then cfg+=" · 🔍 local/${CONTEXT}"
+    else cfg+=" · 🧠 ai ${AI_PROVIDER}/${CONTEXT}"; fi
+  fi
   (( DRY_RUN > 0 )) && cfg+=" · ${YELLOW}dry-run${GRAY}"
   cfg+="${RESET}"
   note "  $cfg"

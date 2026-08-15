@@ -190,6 +190,31 @@ setup() {
   [[ "$output" != *"can't be used with multiple inputs"* ]]
 }
 
+@test "TAKEN re-claim: two sources renamed to the same AI name get suffixed" {
+  # Reproduces the --apply batch-collision path without a network call: the run
+  # loop claims the pre-rename dst, then optimize_one releases it and re-claims
+  # the AI-suggested name. Two sources whose AI name collides must not overwrite.
+  in="$BATS_TEST_TMPDIR/in"; od="$BATS_TEST_TMPDIR/od"; mkdir -p "$in" "$od"
+  : > "$in/a.png"; : > "$in/b.png"
+  fn_slug="$(sed -n '/^slugify() {/,/^}/p' "$SQUISH")"
+  fn_kind="$(sed -n '/^img_kind() {/,/^}/p' "$SQUISH")"
+  fn_ext="$(sed -n '/^out_ext_for() {/,/^}/p' "$SQUISH")"
+  fn_stem="$(sed -n '/^build_stem() {/,/^}/p' "$SQUISH")"
+  fn_dest="$(sed -n '/^dest_for() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c '
+    declare -A TAKEN; OUTPUT="" OUT_DIR="'"$od"'" NAME_AS=slug WIDTH=0
+    '"$fn_slug"$'\n'"$fn_kind"$'\n'"$fn_ext"$'\n'"$fn_stem"$'\n'"$fn_dest"$'
+    for src in "'"$in"'/a.png" "'"$in"'/b.png"; do
+      RENAME="" dst="$(dest_for "$src")"; TAKEN[$dst]=1        # pre-rename claim (run loop)
+      unset "TAKEN[$dst]"                                       # optimize_one releases it
+      dst="$(RENAME=logo dest_for "$src")"; TAKEN[$dst]=1       # and re-claims the AI name
+      echo "$dst"
+    done
+  ')"
+  [[ "$out" == *"$od/logo.png"* ]]
+  [[ "$out" == *"$od/logo-2.png"* ]]
+}
+
 @test "colliding output names get numeric suffixes" {
   command -v magick >/dev/null || skip "needs ImageMagick"
   d="$BATS_TEST_TMPDIR/out"; mkdir -p "$d"

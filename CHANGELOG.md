@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `--apply` batch collisions: when the AI suggests the same name for two images,
+  the second no longer silently overwrites the first — it gets a numeric suffix.
+- Local `--ai` (no key) now requires ImageMagick and warns instead of silently
+  misclassifying every image when `magick` is absent (e.g. sips-only macOS).
+- AI cache key now includes the provider, so switching providers with the same
+  model name no longer returns a stale cross-provider result.
+
 ## [0.3.0] - 2026-08-15
 
 ### Added

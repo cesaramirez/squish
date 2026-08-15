@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-15
+
+### Fixed
+
+- Compression failures are now reported as failures instead of false success:
+  if a tool can't write the output (e.g. optimizing a JPEG without ImageMagick),
+  squish prints an error and exits non-zero rather than claiming success with an
+  empty file.
+- Removed the undeclared `bc` dependency: size and percentage formatting now use
+  pure-bash integer arithmetic, so squish works on minimal systems (Alpine, slim
+  Docker images) that don't ship `bc`.
+
 ## [0.5.0] - 2026-08-15
 
 ### Added
@@ -78,7 +90,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vision-AI analysis via `--ai` (OpenAI and Anthropic) suggesting a semantic
   filename, alt text, optimal parameters, and a ready-to-paste HTML snippet.
 
-[Unreleased]: https://github.com/cesaramirez/squish/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/cesaramirez/squish/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/cesaramirez/squish/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/cesaramirez/squish/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/cesaramirez/squish/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cesaramirez/squish/compare/v0.2.0...v0.3.0

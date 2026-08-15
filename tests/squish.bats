@@ -227,3 +227,22 @@ setup() {
   [ -f "$d/logo-a.png" ]
   [ -f "$d/logo-a-2.png" ]
 }
+
+@test "squishrc: colors default is read from ./.squishrc" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf 'colors=64\n' > .squishrc
+  run bash "$SQUISH" in.png --dry-run --no-color
+  [[ "$output" == *"64c"* ]]
+}
+
+@test "squishrc: CLI flag overrides a .squishrc value" {
+  mkdir -p "$BATS_TEST_TMPDIR/proj"
+  cd "$BATS_TEST_TMPDIR/proj"
+  cp "$IN" in.png
+  printf 'colors=64\n' > .squishrc
+  run bash "$SQUISH" in.png --colors 32 --dry-run --no-color
+  [[ "$output" == *"32c"* ]]
+  [[ "$output" != *"64c"* ]]
+}

@@ -202,7 +202,7 @@ setup() {
   fn_stem="$(sed -n '/^build_stem() {/,/^}/p' "$SQUISH")"
   fn_dest="$(sed -n '/^dest_for() {/,/^}/p' "$SQUISH")"
   out="$(bash -c '
-    declare -A TAKEN; OUTPUT="" OUT_DIR="'"$od"'" NAME_AS=slug WIDTH=0
+    declare -A TAKEN WALK_ROOT; OUTPUT="" OUT_DIR="'"$od"'" NAME_AS=slug WIDTH=0
     '"$fn_slug"$'\n'"$fn_kind"$'\n'"$fn_ext"$'\n'"$fn_stem"$'\n'"$fn_dest"$'
     for src in "'"$in"'/a.png" "'"$in"'/b.png"; do
       RENAME="" dst="$(dest_for "$src")"; TAKEN[$dst]=1        # pre-rename claim (run loop)
@@ -409,4 +409,28 @@ setup() {
   run bash "$SQUISH" "$root" -R --output "$BATS_TEST_TMPDIR/x.png" --no-color
   [ "$status" -ne 0 ]
   [[ "$output" == *"can't be used with multiple inputs"* ]]
+}
+
+@test "recursive: -R with --out-dir mirrors the source tree" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  root="$BATS_TEST_TMPDIR/assets"; mkdir -p "$root/ui"
+  magick -size 40x40 xc:red  "$root/logo.png"
+  magick -size 40x40 xc:blue "$root/ui/icon.png"
+  dist="$BATS_TEST_TMPDIR/dist"
+  run bash "$SQUISH" "$root" -R --out-dir "$dist" --no-color
+  [ "$status" -eq 0 ]
+  # top-level file lands at dist root; nested file mirrors its subdir.
+  [ -f "$dist/logo.png" ]
+  [ -f "$dist/ui/icon.png" ]
+}
+
+@test "recursive: a loose file under --out-dir still flattens (not mirrored)" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  sub="$BATS_TEST_TMPDIR/deep/nested"; mkdir -p "$sub"
+  magick -size 40x40 xc:red "$sub/pic.png"
+  dist="$BATS_TEST_TMPDIR/out"
+  # Passed as a direct file (no -R): no walk root, so it flattens to dist/pic.png.
+  run bash "$SQUISH" "$sub/pic.png" --out-dir "$dist" --no-color
+  [ "$status" -eq 0 ]
+  [ -f "$dist/pic.png" ]
 }

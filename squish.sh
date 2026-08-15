@@ -235,7 +235,6 @@ expand_inputs() {
       found=0
       while IFS= read -r -d '' f; do
         expanded+=("$f")
-        # shellcheck disable=SC2034  # consumed by dest_for in a later task (tree mirroring under --out-dir)
         WALK_ROOT["$f"]="$item"
         found=1
       done < <(discover_images "$item")
@@ -871,7 +870,19 @@ dest_for() {
   # --output wins outright (explicit single path).
   [[ -n "$OUTPUT" ]] && { printf '%s' "$OUTPUT"; return; }
   local stem dir dst ext; stem="$(build_stem "$src")"; ext="$(out_ext_for "$src")"
-  if [[ -n "$OUT_DIR" ]]; then dir="$OUT_DIR"; else dir="$(dirname "$src")"; fi
+  if [[ -n "$OUT_DIR" ]]; then
+    if [[ -n "${WALK_ROOT[$src]:-}" ]]; then
+      local root="${WALK_ROOT[$src]%/}" rel reldir
+      rel="${src#"$root"/}"                 # path relative to the walk root
+      reldir="$(dirname "$rel")"
+      if [[ "$reldir" == "." ]]; then dir="$OUT_DIR"; else dir="$OUT_DIR/$reldir"; fi
+      mkdir -p "$dir"
+    else
+      dir="$OUT_DIR"                         # loose file: flatten (existing behavior)
+    fi
+  else
+    dir="$(dirname "$src")"
+  fi
   dst="$dir/$stem.$ext"
   # Safety: never overwrite the source in place. If names collide (e.g. slug of an
   # already-clean name in the same dir), append -min so the original survives.

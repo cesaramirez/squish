@@ -55,11 +55,14 @@ setup() {
 }
 
 @test "--width never upscales a small input" {
-  # Input is 200px wide; asking for 400px must not upscale.
+  command -v magick >/dev/null || skip "needs ImageMagick to read dimensions"
+  # Input is 200px wide; asking for 400px must not upscale the output.
   out="$BATS_TEST_TMPDIR/wide.png"
-  run bash "$SQUISH" "$IN" --width 400 --output "$out" --dry-run
-  # Dry-run reports the source dims unchanged (never upscaled to 400px wide).
-  [[ "$output" == *"200x200"* ]]
+  run bash "$SQUISH" "$IN" --width 400 --output "$out" --no-color
+  [ "$status" -eq 0 ]
+  [ -f "$out" ]
+  w="$(magick identify -format '%w' "$out")"
+  [ "$w" -le 200 ]
 }
 
 @test "unknown flag exits non-zero" {

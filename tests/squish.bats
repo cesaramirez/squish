@@ -127,3 +127,34 @@ setup() {
   out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/ic.png'")"
   [ "$(printf '%s' "$out" | jq -r '.kind')" = "icon" ]
 }
+
+@test "ai cache: a seeded entry is returned without a network call" {
+  command -v jq >/dev/null || skip "needs jq"
+  # Point the cache at the test tmp dir.
+  export XDG_CACHE_HOME="$BATS_TEST_TMPDIR/cache"
+  # Compute the key the way the script does and seed a JSON entry.
+  fn_sha="$(sed -n '/^sha256() {/,/^}/p' "$SQUISH")"
+  fn_key="$(sed -n '/^ai_cache_key() {/,/^}/p' "$SQUISH")"
+  key="$(bash -c "AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"ai_cache_key '$IN'")"
+  mkdir -p "$XDG_CACHE_HOME/squish"
+  printf '{"name":"seeded-name"}' > "$XDG_CACHE_HOME/squish/$key.json"
+  # ai_cache_get must return it.
+  fn_dir="$(sed -n '/^ai_cache_dir() {/,/^}/p' "$SQUISH")"
+  fn_get="$(sed -n '/^ai_cache_get() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "NO_CACHE=0 AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"$fn_dir"$'\n'"$fn_get"$'\n'"ai_cache_get '$IN'")"
+  [ "$(printf '%s' "$out" | jq -r '.name')" = "seeded-name" ]
+}
+
+@test "ai cache: --no-cache bypasses a seeded entry" {
+  command -v jq >/dev/null || skip "needs jq"
+  export XDG_CACHE_HOME="$BATS_TEST_TMPDIR/cache"
+  fn_sha="$(sed -n '/^sha256() {/,/^}/p' "$SQUISH")"
+  fn_key="$(sed -n '/^ai_cache_key() {/,/^}/p' "$SQUISH")"
+  fn_dir="$(sed -n '/^ai_cache_dir() {/,/^}/p' "$SQUISH")"
+  fn_get="$(sed -n '/^ai_cache_get() {/,/^}/p' "$SQUISH")"
+  key="$(bash -c "AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"ai_cache_key '$IN'")"
+  mkdir -p "$XDG_CACHE_HOME/squish"
+  printf '{"name":"seeded-name"}' > "$XDG_CACHE_HOME/squish/$key.json"
+  run bash -c "NO_CACHE=1 AI_MODEL=gpt-4o-mini CONTEXT=general AI_FIELDS=name; $fn_sha"$'\n'"$fn_key"$'\n'"$fn_dir"$'\n'"$fn_get"$'\n'"ai_cache_get '$IN'"
+  [ "$status" -ne 0 ]  # nothing returned when bypassed
+}

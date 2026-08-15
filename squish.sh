@@ -80,6 +80,7 @@ CONTEXT="general"     # general | email-signature | web | hero | icon | avatar
 AI_FIELDS="name,alt,params,html"
 AI_PROVIDER="auto"    # auto | anthropic | openai
 AI_MODEL=""           # empty = provider default (haiku / gpt-4o-mini)
+NO_CACHE=0            # skip AI result cache
 QUIET=0
 NO_COLOR=0
 INPUTS=()
@@ -123,6 +124,7 @@ while [[ $# -gt 0 ]]; do
         --ai-fields) AI_FIELDS="${2:?}"; shift 2 ;;
         --ai-model) AI_MODEL="${2:?}"; shift 2 ;;
         --ai-provider) AI_PROVIDER="${2:?}"; shift 2 ;;
+        --no-cache) NO_CACHE=1; shift ;;
         --no-color) NO_COLOR=1; shift ;;
     -q|--quiet)    QUIET=1; shift ;;
     -h|--help)     NO_COLOR=1; usage; exit 0 ;;
@@ -461,18 +463,56 @@ ai_openai() {
   printf '%s' "$resp" | jq -e -c '.choices[0].message.content | fromjson' 2>/dev/null
 }
 
+# --- AI result cache ----------------------------------------------------------
+ai_cache_dir() { printf '%s/squish' "${XDG_CACHE_HOME:-$HOME/.cache}"; }
+
+# Cache key: sha of (file-sha + model + context + fields), so any of them
+# changing regenerates. Uses a temp file because sha256 reads a file.
+ai_cache_key() {
+  local fsha material
+  fsha="$(sha256 "$1")"
+  material="${fsha}-${AI_MODEL}-${CONTEXT}-${AI_FIELDS}"
+  if command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$material" | shasum -a 256 | cut -d' ' -f1
+  else
+    printf '%s' "$material" | sha256sum | cut -d' ' -f1
+  fi
+}
+
+ai_cache_get() {
+  (( NO_CACHE )) && return 1
+  local key file
+  key="$(ai_cache_key "$1")" || return 1
+  file="$(ai_cache_dir)/${key}.json"
+  [[ -f "$file" ]] || return 1
+  cat "$file"
+}
+
+ai_cache_set() {
+  (( NO_CACHE )) && return 0
+  local key dir file
+  key="$(ai_cache_key "$1")" || return 0
+  dir="$(ai_cache_dir)"; mkdir -p "$dir" 2>/dev/null || return 0
+  file="${dir}/${key}.json"
+  printf '%s' "$2" > "$file" 2>/dev/null || true
+}
+
 # Analyze an image. Echoes validated JSON to stdout, or nothing on failure.
 ai_analyze() {
-  local src="$1" b64 mt schema dims
+  local src="$1" b64 mt schema dims cached result
+  cached="$(ai_cache_get "$src")" && { printf '%s' "$cached"; return 0; }
   b64="$(base64 < "$src" | tr -d '\n')" || return 1
   mt="$(media_type_of "$src")"
   schema="$(ai_schema)"
   dims="$(dims_of "$src")"   # WxH of the analyzed (resized) image, for the prompt
   case "$AI_PROVIDER" in
-    openai)    ai_openai    "$mt" "$b64" "$schema" "$dims" ;;
-    anthropic) ai_anthropic "$mt" "$b64" "$schema" "$dims" ;;
+    openai)    result="$(ai_openai    "$mt" "$b64" "$schema" "$dims")" ;;
+    anthropic) result="$(ai_anthropic "$mt" "$b64" "$schema" "$dims")" ;;
     *) return 1 ;;
   esac
+  [[ -n "$result" ]] || return 1
+  ai_cache_set "$src" "$result"
+  printf '%s' "$result"
 }
 
 # --- state --------------------------------------------------------------------

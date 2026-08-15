@@ -1,0 +1,14 @@
+# secrets — never commit API keys
+.env
+.env.*
+.dev.vars
+*.key
+
+# macOS
+.DS_Store
+
+# test / scratch output
+dist/
+*.optimized.*
+*-min.png
+*@2x.png

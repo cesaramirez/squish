@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Project config: an optional `./.squishrc` (`key=value`) persists default flags
+  per project. Precedence is CLI flags > `.squishrc` > built-in defaults. Parsed
+  safely (never sourced); unknown keys and invalid values are warned and skipped.
+
 ## [0.3.0] - 2026-08-15
 
 ### Added

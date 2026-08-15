@@ -91,6 +91,7 @@ NO_CACHE=0            # skip AI result cache
 QUIET=0
 NO_COLOR=0
 INPUTS=()
+RC_LOADED=0           # set to 1 when a ./.squishrc was read
 
 # --- colors -------------------------------------------------------------------
 # Honor NO_COLOR, --no-color, and non-TTY output (pipes, CI) automatically.
@@ -105,10 +106,78 @@ setup_colors() {
 }
 
 die()  { printf '%s✗%s %s\n' "${RED:-}" "${RESET:-}" "$*" >&2; exit 1; }
+
+# --- .squishrc (project config) ----------------------------------------------
+# Reads ./.squishrc (key=value) and overwrites defaults. CLI flags, parsed
+# after this runs, take precedence. NEVER source the file (RCE); parse by hand.
+rc_warn() { # LINE MSG   (LINE 0 => file-level, no line number)
+  local ln="$1"; shift
+  if [[ "$ln" == "0" ]]; then printf '%s⚠%s .squishrc: %s\n' "${YELLOW:-}" "${RESET:-}" "$*" >&2
+  else printf '%s⚠%s .squishrc:%s: %s\n' "${YELLOW:-}" "${RESET:-}" "$ln" "$*" >&2; fi
+}
+
+rc_bool() { # VARNAME VAL LINE  -> set VARNAME to 1/0 for truthy/falsy, else warn
+  local var="$1" val="$2" ln="$3"
+  case "$(printf '%s' "$val" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes)  printf -v "$var" '%d' 1 ;;
+    0|false|no)  printf -v "$var" '%d' 0 ;;
+    *)           rc_warn "$ln" "invalid boolean for '$var': '$val'" ;;
+  esac
+}
+
+apply_rc_key() { # KEY VAL LINE
+  local key="$1" val="$2" ln="$3"
+  case "$key" in
+    colors)       { [[ "$val" =~ ^[0-9]+$ ]] && (( val>=2 && val<=256 )); } \
+                    && COLORS="$val" || rc_warn "$ln" "invalid colors '$val'" ;;
+    width)        [[ "$val" =~ ^[0-9]+$ ]] && WIDTH="$val" || rc_warn "$ln" "invalid width '$val'" ;;
+    jpeg_quality) { [[ "$val" =~ ^[0-9]+$ ]] && (( val>=1 && val<=100 )); } \
+                    && JPEG_QUALITY="$val" || rc_warn "$ln" "invalid jpeg_quality '$val'" ;;
+    webp)         rc_bool WEBP     "$val" "$ln" ;;
+    avif)         rc_bool AVIF     "$val" "$ln" ;;
+    ai)           rc_bool AI       "$val" "$ln" ;;
+    no_cache)     rc_bool NO_CACHE "$val" "$ln" ;;
+    quiet)        rc_bool QUIET    "$val" "$ln" ;;
+    no_color)     rc_bool NO_COLOR "$val" "$ln" ;;
+    name_as)      case "$val" in slug|optimized|plain|retina|width) NAME_AS="$val" ;; \
+                    *) rc_warn "$ln" "invalid name_as '$val'" ;; esac ;;
+    ai_provider)  case "$val" in auto|openai|anthropic) AI_PROVIDER="$val" ;; \
+                    *) rc_warn "$ln" "invalid ai_provider '$val'" ;; esac ;;
+    context)      CONTEXT="$val" ;;
+    ai_model)     AI_MODEL="$val" ;;
+    ai_fields)    AI_FIELDS="$val" ;;
+    out_dir)      OUT_DIR="$val" ;;
+    *)            rc_warn "$ln" "unknown key '$key'" ;;
+  esac
+}
+
+load_squishrc() {
+  local rc="./.squishrc"
+  [[ -f "$rc" ]] || return 0
+  if [[ ! -r "$rc" ]]; then rc_warn 0 "cannot read .squishrc; using defaults"; return 0; fi
+  local lineno=0 line key val
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno+1))
+    line="${line%%#*}"                          # strip comment
+    line="${line#"${line%%[![:space:]]*}"}"     # ltrim
+    line="${line%"${line##*[![:space:]]}"}"     # rtrim
+    [[ -z "$line" ]] && continue
+    if [[ "$line" != *=* ]]; then rc_warn "$lineno" "not key=value: $line"; continue; fi
+    key="${line%%=*}"; val="${line#*=}"
+    key="${key%"${key##*[![:space:]]}"}"        # rtrim key
+    val="${val#"${val%%[![:space:]]*}"}"        # ltrim val
+    apply_rc_key "$key" "$val" "$lineno"
+  done < "$rc"
+  RC_LOADED=1
+}
+
 log()  { [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*"; }
 note() { [[ "$QUIET" -eq 1 ]] || printf '%s\n' "$*"; }
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; s/^#$//' | sed '$d'; }
+
+# Load project config before args so CLI flags override it.
+load_squishrc
 
 # --- parse args ---------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
@@ -792,6 +861,7 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
     else cfg+=" · 🧠 ai ${AI_PROVIDER}/${CONTEXT}"; fi
   fi
   (( DRY_RUN > 0 )) && cfg+=" · ${YELLOW}dry-run${GRAY}"
+  (( RC_LOADED )) && cfg+=" · ${DIM}⚙ .squishrc${GRAY}"
   cfg+="${RESET}"
   note "  $cfg"
   note ""

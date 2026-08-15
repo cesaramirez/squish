@@ -125,6 +125,35 @@ automatically when piped or in CI.
 | `-q, --quiet`       | Only print the per-file result lines. |
 | `-h, --help`        | Help. |
 
+### Project config (`.squishrc`)
+
+Drop a `.squishrc` in a project directory to persist default flags, so you don't
+retype them every run. It's a flat `key=value` file; lines starting with `#` are
+comments. Only `./.squishrc` (the current directory) is read.
+
+```ini
+# .squishrc — defaults for this project
+colors=64
+webp=1
+ai=1
+context=email-signature
+out_dir=dist
+```
+
+**Precedence:** CLI flags override `.squishrc`, which overrides built-in defaults.
+
+| Source            | Wins over        |
+|-------------------|------------------|
+| CLI flag          | everything       |
+| `./.squishrc`     | built-in default |
+| built-in default  | —                |
+
+Supported keys: `colors`, `width`, `webp`, `avif`, `jpeg_quality`, `name_as`,
+`out_dir`, `ai`, `context`, `ai_provider`, `ai_model`, `ai_fields`, `no_cache`,
+`quiet`, `no_color`. Per-invocation actions (`--output`, `--rename`, `--apply`,
+`--dry-run`, and the input files) are CLI-only. Unknown keys and invalid values
+are warned and skipped; the file is never executed.
+
 ### Output naming (`--name-as`)
 
 With `"forma_derecha 1.png"` and `-w 400`:

@@ -125,6 +125,32 @@ automatically when piped or in CI.
 | `-q, --quiet`       | Only print the per-file result lines. |
 | `-h, --help`        | Help. |
 
+### Recursive (`-R`)
+
+Pass a directory with `-R` (or `--recursive`) to optimize every supported image
+inside it, at any depth:
+
+```bash
+squish assets/ -R --webp
+```
+
+It discovers `.png`, `.jpg`, and `.jpeg` files (case-insensitive), skips
+everything else and any hidden directory (`.git/`, `.cache/`), and does not
+follow symlinks. Outputs are written in place, next to each source.
+
+With `--out-dir`, the source tree is mirrored into the target:
+
+```
+assets/logo.png      →  dist/logo.png
+assets/ui/icon.png   →  dist/ui/icon.png
+```
+
+```bash
+squish assets/ -R --out-dir dist/
+```
+
+(`-r` remains `--retina`; the recursive short flag is the capital `-R`.)
+
 ### Project config (`.squishrc`)
 
 Drop a `.squishrc` in a project directory to persist default flags, so you don't

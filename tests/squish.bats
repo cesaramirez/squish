@@ -178,3 +178,27 @@ setup() {
   run bash -c "printf '%s' '$out' | jq -e '.properties.context'"
   [ "$status" -ne 0 ]  # no context property
 }
+
+@test "--apply is allowed with multiple inputs" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  a="$BATS_TEST_TMPDIR/a.png"; b="$BATS_TEST_TMPDIR/b.png"
+  magick -size 60x60 xc:red "$a"; magick -size 60x60 xc:blue "$b"
+  # No key -> local mode; --apply is forced off internally, but the guard must
+  # not abort the run for multiple inputs.
+  OPENAI_API_KEY= ANTHROPIC_API_KEY= run bash "$SQUISH" "$a" "$b" --ai --apply --no-color
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"can't be used with multiple inputs"* ]]
+}
+
+@test "colliding output names get numeric suffixes" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  d="$BATS_TEST_TMPDIR/out"; mkdir -p "$d"
+  # Two differently-named sources that slug to the same name.
+  magick -size 60x60 xc:red  "$BATS_TEST_TMPDIR/Logo A.png"
+  magick -size 60x60 xc:blue "$BATS_TEST_TMPDIR/logo-a.png"
+  run bash "$SQUISH" "$BATS_TEST_TMPDIR/Logo A.png" "$BATS_TEST_TMPDIR/logo-a.png" \
+    --out-dir "$d" --no-color
+  [ "$status" -eq 0 ]
+  [ -f "$d/logo-a.png" ]
+  [ -f "$d/logo-a-2.png" ]
+}

@@ -160,7 +160,6 @@ if [[ -z "$CONTEXT" ]]; then
 fi
 
 case "$CONTEXT" in auto|general|email-signature|web|hero|icon|avatar) ;; *) die "--context must be one of: auto, general, email-signature, web, hero, icon, avatar" ;; esac
-(( APPLY )) && [[ ${#INPUTS[@]} -gt 1 ]] && die "--apply can't be used with multiple inputs (each name would collide)"
 
 # --- deps ---------------------------------------------------------------------
 # Image engines: sips (macOS, no deps) and/or ImageMagick (cross-platform).
@@ -528,6 +527,7 @@ ai_analyze() {
 
 # --- state --------------------------------------------------------------------
 TOTAL_IN=0 TOTAL_OUT=0 OK_COUNT=0 FAIL_COUNT=0
+declare -A TAKEN=()   # destination paths already claimed this run
 AI_JSON=""   # per-file AI result, consumed by dest_for/reporting
 
 # Compress WORK into DST, picking the path by output extension.
@@ -744,6 +744,12 @@ dest_for() {
   if [[ "$(cd "$(dirname "$src")" && pwd)/$(basename "$src")" == "$(cd "$dir" 2>/dev/null && pwd)/$stem.$ext" ]]; then
     dst="$dir/$stem-min.$ext"
   fi
+  # If this destination was already claimed this run, add -2, -3, ...
+  if [[ -n "${TAKEN[$dst]:-}" ]]; then
+    local base="${dst%.*}" ext2="${dst##*.}" n=2
+    while [[ -n "${TAKEN[${base}-${n}.${ext2}]:-}" ]]; do n=$((n+1)); done
+    dst="${base}-${n}.${ext2}"
+  fi
   printf '%s' "$dst"
 }
 
@@ -764,7 +770,9 @@ note "${BOLD}${GREEN}▚ squish${RESET} ${DIM}image optimizer${RESET}"
 }
 
 for src in "${INPUTS[@]}"; do
-  optimize_one "$src" "$(dest_for "$src")" || true
+  dst="$(dest_for "$src")"
+  TAKEN[$dst]=1
+  optimize_one "$src" "$dst" || true
 done
 
 # --- summary ------------------------------------------------------------------

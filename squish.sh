@@ -378,17 +378,31 @@ sha256() {
   fi
 }
 
-human() { # bytes -> human readable, fixed width
+human() { # bytes -> human readable, fixed width. Pure bash (no bc).
   local b=$1
-  if   (( b >= 1048576 )); then printf '%.1f MB' "$(echo "$b/1048576" | bc -l)"
-  elif (( b >= 1024 ));    then printf '%.1f KB' "$(echo "$b/1024" | bc -l)"
-  else printf '%d B' "$b"; fi
+  if   (( b >= 1048576 )); then
+    # MB with one decimal: (b*10/1048576) gives tenths, rounded.
+    local t=$(( (b * 10 + 524288) / 1048576 ))
+    printf '%d.%d MB' "$(( t / 10 ))" "$(( t % 10 ))"
+  elif (( b >= 1024 )); then
+    local t=$(( (b * 10 + 512) / 1024 ))
+    printf '%d.%d KB' "$(( t / 10 ))" "$(( t % 10 ))"
+  else
+    printf '%d B' "$b"
+  fi
 }
 
-pct_saved() { # in out -> integer percent saved (rounded). Guards divide-by-zero.
+pct_saved() { # in out -> integer percent saved (rounded). Pure bash (no bc).
   local in="$1" out="$2"
   (( in == 0 )) && { echo 0; return; }
-  echo "scale=4; r=(1 - $out/$in) * 100; scale=0; (r+0.5)/1" | bc -l
+  # round( (1 - out/in) * 100 ) = round( (in-out)*100 / in ). Can be negative
+  # if the "optimized" file grew; keep the sign for honest reporting.
+  local num=$(( (in - out) * 100 ))
+  if (( num >= 0 )); then
+    echo $(( (num + in / 2) / in ))
+  else
+    echo $(( (num - in / 2) / in ))
+  fi
 }
 
 # --- image engine (cross-platform) --------------------------------------------
@@ -697,6 +711,10 @@ compress_to() {
       oxipng -o max --strip all --quiet "$tmp" --out "$dst" 2>/dev/null
       ;;
   esac
+  # A tool may fail (e.g. no ImageMagick for JPEG) without writing $dst. Treat a
+  # missing or empty output as failure so the caller counts it as skipped, not
+  # a false success.
+  [[ -s "$dst" ]]
 }
 
 # Emit a WebP sibling of DST from WORK. Prefers cwebp, falls back to magick.
@@ -775,7 +793,12 @@ optimize_one() {
   fi
 
   # 1+2) compress into the final file (format-aware).
-  compress_to "$work" "$dst" "$tmp"
+  if ! compress_to "$work" "$dst" "$tmp"; then
+    rm -f "$dst" 2>/dev/null   # remove any zero-byte artifact
+    printf '%s✗%s %s %s(compress failed — is ImageMagick installed?)%s\n' \
+      "$RED" "$RESET" "$(basename "$src")" "$DIM" "$RESET"
+    FAIL_COUNT=$(( FAIL_COUNT + 1 )); return 1
+  fi
 
   local in_b out_b pct; in_b=$(filesize "$src"); out_b=$(filesize "$dst")
   out_dims="$(dims_of "$dst")"

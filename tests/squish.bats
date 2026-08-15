@@ -93,3 +93,33 @@ setup() {
   [ "$da" = "$db" ]
   [ "$da" != "$dc" ]
 }
+
+@test "analyze_local classifies a flat 2-color image as logo" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  magick -size 300x300 xc:white -fill black -draw "rectangle 50,50 250,250" \
+    "$BATS_TEST_TMPDIR/flat.png"
+  fn="$(sed -n '/^analyze_local() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/flat.png'")"
+  kind="$(printf '%s' "$out" | jq -r '.kind')"
+  [ "$kind" = "logo" ]
+}
+
+@test "analyze_local classifies a smooth gradient as gradient" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  magick -size 400x400 gradient:'#0a3d1d-#1fae4f' "$BATS_TEST_TMPDIR/grad.png"
+  fn="$(sed -n '/^analyze_local() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/grad.png'")"
+  kind="$(printf '%s' "$out" | jq -r '.kind')"
+  [ "$kind" = "gradient" ]
+}
+
+@test "analyze_local classifies a tiny image as icon" {
+  command -v magick >/dev/null || skip "needs ImageMagick"
+  command -v jq >/dev/null || skip "needs jq"
+  magick -size 32x32 gradient:red-blue "$BATS_TEST_TMPDIR/ic.png"
+  fn="$(sed -n '/^analyze_local() {/,/^}/p' "$SQUISH")"
+  out="$(bash -c "$fn"$'\n'"analyze_local '$BATS_TEST_TMPDIR/ic.png'")"
+  [ "$(printf '%s' "$out" | jq -r '.kind')" = "icon" ]
+}

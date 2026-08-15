@@ -327,6 +327,53 @@ context_hint() {
   esac
 }
 
+# Heuristic image classification using ImageMagick only (no API). Emits JSON:
+#   {kind, suggested_colors, suggest_webp, suggest_avif}
+# Order of checks matters: icon (by size) before gradient/photo (by colors).
+analyze_local() {
+  local src="$1" w h colors kind
+  # Dimensions and unique color count. %k can be large; keep it an integer.
+  w="$(magick identify -format '%w' "${src}[0]" 2>/dev/null || echo 0)"
+  h="$(magick identify -format '%h' "${src}[0]" 2>/dev/null || echo 0)"
+  colors="$(magick identify -format '%k' "${src}[0]" 2>/dev/null || echo 0)"
+  [[ "$w" =~ ^[0-9]+$ ]] || w=0
+  [[ "$h" =~ ^[0-9]+$ ]] || h=0
+  [[ "$colors" =~ ^[0-9]+$ ]] || colors=0
+
+  local maxdim=$(( w > h ? w : h ))
+  if (( maxdim > 0 && maxdim <= 64 )); then
+    kind="icon"
+  elif (( colors > 0 && colors <= 16 )); then
+    kind="logo"
+  elif (( colors >= 256 )); then
+    # Many distinct colors. Smooth blends (gradients/renders) vs photos: use a
+    # cheap edge-density proxy. Photos have high edge energy; gradients low.
+    local edges
+    edges="$(magick "${src}[0]" -colorspace Gray -edge 1 -format '%[fx:mean]' info: 2>/dev/null || echo 0)"
+    # mean edge magnitude in [0,1]; photos ~>0.06, smooth gradients ~<0.03.
+    if [[ "$edges" =~ ^0?\.[0-9]+$|^[01]$ ]] && awk "BEGIN{exit !($edges < 0.05)}"; then
+      kind="gradient"
+    else
+      kind="photo"
+    fi
+  else
+    kind="illustration"
+  fi
+
+  local sc webp avif
+  case "$kind" in
+    photo|gradient) sc=256; webp=true;  avif=true ;;
+    illustration)   sc=128; webp=true;  avif=false ;;
+    logo)           sc=64;  webp=false; avif=false ;;
+    icon)           sc=32;  webp=false; avif=false ;;
+  esac
+  # Map illustration onto the photo/logo/gradient/icon enum the schema allows.
+  [[ "$kind" == "illustration" ]] && kind="logo"
+
+  jq -n --arg kind "$kind" --argjson sc "$sc" --argjson webp "$webp" --argjson avif "$avif" \
+    '{kind:$kind, suggested_colors:$sc, suggest_webp:$webp, suggest_avif:$avif}'
+}
+
 # Build the JSON schema (properties + required) from --ai-fields.
 ai_schema() {
   local props='' req='' want_name=0 want_alt=0 want_params=0 want_html=0 f

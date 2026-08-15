@@ -15,3 +15,7 @@ dist/
 
 # SDD workspace scratch (superpowers)
 .superpowers/
+
+# process artifacts — specs & plans stay local, not in the public repo
+docs/specs/
+docs/plans/

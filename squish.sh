@@ -41,15 +41,17 @@
 #                        e.g. --rename signature-arc --name-as retina -> signature-arc@2x.png
 #
 #   AI (vision — OpenAI or Anthropic; degrades gracefully if no key/tools):
-#       --ai           Analyze the image and print suggestions (name, alt, params, html).
+#       --ai           Analyze the image. With a key: full AI (name, alt, params,
+#                      html). Without a key: local heuristic (kind + params).
 #       --ai-provider P  auto (default) | openai | anthropic.
 #                        auto uses OPENAI_API_KEY, else ANTHROPIC_API_KEY.
-#       --context WHAT What the image is for, so the AI calibrates its output:
-#                        general (default) | email-signature | web | hero | icon | avatar
+#       --context WHAT auto (default under --ai) | general | email-signature |
+#                      web | hero | icon | avatar
 #       --ai-fields L  Comma list of fields to request (default: name,alt,params,html).
 #                        Any of: name, alt, params, html.
 #       --apply        Apply the AI's suggested name automatically (implies --ai).
 #       --ai-model M   Model override (default: gpt-4o-mini / claude-haiku-4-5).
+#       --no-cache     Bypass the AI result cache (~/.cache/squish/).
 #
 #       --no-color     Disable colored output (also respects NO_COLOR env var).
 #   -q, --quiet        Only print the per-file result lines.

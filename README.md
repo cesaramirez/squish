@@ -116,10 +116,11 @@ automatically when piped or in CI.
 | `--rename NAME`     | Replace the base name entirely (single input; slugified). |
 | `--ai`              | Analyze the image with vision AI and print suggestions (see AI section). |
 | `--ai-provider P`   | `auto` (default) / `openai` / `anthropic`. `auto` uses whichever key is set. |
-| `--context WHAT`    | What the image is for: `general` (default) / `email-signature` / `web` / `hero` / `icon` / `avatar`. |
+| `--context WHAT`    | What the image is for: `auto` (default under `--ai`) / `general` / `email-signature` / `web` / `hero` / `icon` / `avatar`. |
 | `--ai-fields L`     | Comma list of fields to request (default `name,alt,params,html`). |
-| `--apply`           | Apply the AI-suggested name automatically (implies `--ai`). |
+| `--apply`           | Apply the AI-suggested name automatically (implies `--ai`); works on batches with collision suffixes. |
 | `--ai-model M`      | Model override (default `gpt-4o-mini` / `claude-haiku-4-5`). |
+| `--no-cache`        | Bypass the AI result cache (`~/.cache/squish/`). |
 | `--no-color`        | Disable color (also respects `NO_COLOR`). |
 | `-q, --quiet`       | Only print the per-file result lines. |
 | `-h, --help`        | Help. |
@@ -160,6 +161,17 @@ structured JSON and prints it as suggestions:
 squish arc.png -w 400 --ai --context email-signature
 ```
 
+### Modes
+
+`--ai` **works with or without an API key**:
+
+- **With a key** (OpenAI or Anthropic): full AI analysis — semantic name, alt
+  text, optimal parameters (colors, webp, avif), and a ready-to-paste HTML
+  snippet tuned to context.
+- **Without a key** (local mode): an ImageMagick heuristic detects the image
+  `kind` (photo/logo/gradient/icon) and suggests optimal `--colors` and
+  `--webp`/`--avif` flags. Prints `🔍 auto (local)`.
+
 ### Providers & keys
 
 | Provider | Env var | Default model |
@@ -173,12 +185,29 @@ cheap for this task (classifying one small image). If no key or tools are
 present, `--ai` warns and skips — **the optimization still runs**.
 
 ```bash
+squish photo.jpg --ai                 # no key → local heuristic; with key → full AI
 export OPENAI_API_KEY="sk-..."        # or ANTHROPIC_API_KEY
-squish photo.jpg --ai                 # suggest only
 squish photo.jpg --ai --apply         # apply the suggested name
-squish arc.png --ai --context web     # HTML tuned for web (<picture> + webp)
+squish arc.png --ai --context email-signature
 squish icon.png --ai --ai-fields name,alt
 ```
+
+### Context inference (`--context`)
+
+Under `--ai`, if you don't pass `--context`, it defaults to `auto` — the model
+infers whether the image is an avatar, hero, icon, web image, email signature,
+or general. You can still override with an explicit `--context web` etc.
+
+### Caching
+
+AI results are cached by default (in `~/.cache/squish/`, keyed by image content
+hash + model + context + fields). Subsequent runs on the same image with the
+same settings re-use the cache. To bypass: `--no-cache`.
+
+### Batch mode
+
+`--apply` works on multiple inputs. When output names collide, the script adds
+numeric suffixes: `name.png`, `name-2.png`, `name-3.png`, etc.
 
 ### What it returns (`--ai-fields`)
 

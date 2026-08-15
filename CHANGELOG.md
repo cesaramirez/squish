@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-15
+
+### Added
+
+- `--ai` now works without an API key — local ImageMagick heuristic detects image kind (photo/logo/gradient/icon) and suggests optimal `--colors`, `--webp`, and `--avif` flags.
+- Automatic context inference via `--context auto` (the default under `--ai`) — the model infers whether the image is an avatar, hero, icon, web image, email signature, or general.
+- AI result caching by content hash (stored in `~/.cache/squish/`); `--no-cache` to bypass.
+- `--apply` now works on batches; colliding output names get numeric suffixes (`name.png`, `name-2.png`, etc.).
+
 ## [0.2.0] - 2026-08-15
 
 ### Added
@@ -41,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vision-AI analysis via `--ai` (OpenAI and Anthropic) suggesting a semantic
   filename, alt text, optimal parameters, and a ready-to-paste HTML snippet.
 
-[Unreleased]: https://github.com/cesaramirez/squish/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cesaramirez/squish/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cesaramirez/squish/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/cesaramirez/squish/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cesaramirez/squish/releases/tag/v0.1.0

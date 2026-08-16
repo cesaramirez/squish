@@ -1,12 +1,12 @@
 class Squish < Formula
   desc "Tiny, fast image optimizer for the terminal with optional vision-AI naming"
   homepage "https://github.com/heycesar/squish"
-  url "https://github.com/heycesar/squish/archive/refs/tags/v0.5.1.tar.gz"
+  url "https://github.com/heycesar/squish/archive/refs/tags/v0.6.0.tar.gz"
   # Compute the real checksum with:
-  #   curl -sL https://github.com/heycesar/squish/archive/refs/tags/v0.5.1.tar.gz | shasum -a 256
-  sha256 "56e34c495436c465ccf3b3947944fed7a2bff3f16971e0f8e4409e73ee09b3d9"
+  #   curl -sL https://github.com/heycesar/squish/archive/refs/tags/v0.6.0.tar.gz | shasum -a 256
+  sha256 "3dc71d4d8861199498345189c7c74d465c4c2f1b514d68c6a55e4ea3e4279bdc"
   license "MIT"
-  version "0.5.1"
+  version "0.6.0"
 
   # Required optimizers.
   depends_on "pngquant"

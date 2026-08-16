@@ -10,7 +10,8 @@
 #
 # Usage:
 #   ./squish.sh input.png                          # optimize in place (writes input-min.png)
-#   ./squish.sh input.png --output out.png         # optimize to a specific path
+#   ./squish.sh input.png --rename my-logo         # name the output my-logo.png (slugified)
+#   ./squish.sh input.png --output path/out.png    # optimize to an exact path
 #   ./squish.sh input.png --width 400              # resize to 400px wide, then compress
 #   ./squish.sh input.png --retina --display 200   # 2x of a 200px display size -> 400px
 #   ./squish.sh input.png --webp                   # also write input.optimized.webp
@@ -38,8 +39,8 @@
 #                        retina     slug + @2x           (needs a resize)
 #                        width      slug + -400w         (needs a resize)
 #                      Never overwrites the source: if names collide, appends -min.
-#       --rename NAME  Replace the base name entirely (single input; slugified).
-#                        e.g. --rename signature-arc --name-as retina -> signature-arc@2x.png
+#       --rename NAME  Name the output yourself (single input). NAME is slugified
+#                        and the right extension is added: --rename my-logo -> my-logo.png
 #
 #   AI (vision — OpenAI or Anthropic; degrades gracefully if no key/tools):
 #       --ai           Analyze the image. With a key: full AI (name, alt, params,

@@ -18,7 +18,12 @@ _squish() {
   if [[ "$cur" == -* ]]; then
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
   else
+    # File completion: only image files. Enable extglob locally for the @(...)
+    # pattern (interactive bash has it off by default).
+    local _shopt_extglob; _shopt_extglob="$(shopt -p extglob)"
+    shopt -s extglob
     COMPREPLY=($(compgen -f -X '!*.@(png|jpg|jpeg|PNG|JPG|JPEG)' -- "$cur"))
+    eval "$_shopt_extglob"
   fi
 }
 complete -F _squish squish

@@ -24,8 +24,8 @@ BASH_COMP="$BATS_TEST_DIRNAME/../completions/squish.bash"
     local values="$1"; shift
     local v
     for v in $values; do
-      grep -qE -- "${v}([^a-z-]|$)" "$ZSH_COMP"  || { echo "zsh missing value: $v"  >&2; return 1; }
-      grep -qE -- "${v}([^a-z-]|$)" "$BASH_COMP" || { echo "bash missing value: $v" >&2; return 1; }
+      grep -qE -- "(^|[^a-z-])${v}([^a-z-]|$)" "$ZSH_COMP"  || { echo "zsh missing value: $v"  >&2; return 1; }
+      grep -qE -- "(^|[^a-z-])${v}([^a-z-]|$)" "$BASH_COMP" || { echo "bash missing value: $v" >&2; return 1; }
     done
   }
   check_values "slug optimized plain retina width"

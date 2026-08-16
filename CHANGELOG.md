@@ -7,11 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-15
+
 ### Added
 
 - Shell tab-completion for zsh and bash (`completions/`): completes flags,
   enumerated values (`--name-as`, `--context`, `--ai-provider`), and image
   files. Installed automatically via Homebrew; manual instructions in the README.
+
+### Fixed
+
+- `--help` no longer shows the misleading `input.png [output.png]` example (the
+  brackets broke in zsh, and the positional output was never actually supported).
+  Usage now shows the real forms, and `--rename` is surfaced as a top example so
+  custom output names are discoverable.
 
 ## [0.5.1] - 2026-08-15
 
@@ -103,7 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Vision-AI analysis via `--ai` (OpenAI and Anthropic) suggesting a semantic
   filename, alt text, optimal parameters, and a ready-to-paste HTML snippet.
 
-[Unreleased]: https://github.com/heycesar/squish/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/heycesar/squish/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/heycesar/squish/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/heycesar/squish/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/heycesar/squish/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/heycesar/squish/compare/v0.3.0...v0.4.0

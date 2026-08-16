@@ -84,7 +84,7 @@ if (( BASH_VERSINFO[0] < 4 )); then
   exit 1
 fi
 
-VERSION="0.5.1"      # bump on each release; printed by --version
+VERSION="0.6.0"      # bump on each release; printed by --version
 
 COLORS=128
 WIDTH=0

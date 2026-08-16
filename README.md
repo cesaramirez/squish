@@ -333,6 +333,30 @@ brew install heycesar/tap/squish
 
 See [docs/HOMEBREW.md](docs/HOMEBREW.md) for tap setup.
 
+## Shell completions
+
+Tab-completion for flags, enumerated values, and image files, in zsh and bash.
+
+**Homebrew:** installed automatically — restart your shell after
+`brew install heycesar/tap/squish` and `squish --<TAB>` just works.
+
+**Manual (curl/clone installs):**
+
+zsh — place the script on your `fpath` as `_squish`:
+
+```zsh
+mkdir -p ~/.zsh/completions
+cp completions/squish.zsh ~/.zsh/completions/_squish
+# in ~/.zshrc, before `compinit`:
+fpath=(~/.zsh/completions $fpath)
+```
+
+bash — source it from `~/.bashrc`:
+
+```bash
+echo "source /path/to/squish/completions/squish.bash" >> ~/.bashrc
+```
+
 ## Contributing
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). CI runs

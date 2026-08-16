@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Shell tab-completion for zsh and bash (`completions/`): completes flags,
+  enumerated values (`--name-as`, `--context`, `--ai-provider`), and image
+  files. Installed automatically via Homebrew; manual instructions in the README.
+
 ## [0.5.1] - 2026-08-15
 
 ### Added

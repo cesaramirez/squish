@@ -21,6 +21,8 @@ class Squish < Formula
 
   def install
     bin.install "squish.sh" => "squish"
+    zsh_completion.install  "completions/squish.zsh"  => "_squish"
+    bash_completion.install "completions/squish.bash" => "squish"
   end
 
   test do

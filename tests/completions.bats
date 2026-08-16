@@ -12,8 +12,8 @@ BASH_COMP="$BATS_TEST_DIRNAME/../completions/squish.bash"
   [ -n "$flags" ]
   local missing=0 f
   while IFS= read -r f; do
-    grep -q -- "$f" "$ZSH_COMP"  || { echo "zsh completion missing: $f"  >&2; missing=1; }
-    grep -q -- "$f" "$BASH_COMP" || { echo "bash completion missing: $f" >&2; missing=1; }
+    grep -qE -- "${f}([^a-z-]|$)" "$ZSH_COMP"  || { echo "zsh completion missing: $f"  >&2; missing=1; }
+    grep -qE -- "${f}([^a-z-]|$)" "$BASH_COMP" || { echo "bash completion missing: $f" >&2; missing=1; }
   done <<< "$flags"
   [ "$missing" -eq 0 ]
 }
@@ -24,8 +24,8 @@ BASH_COMP="$BATS_TEST_DIRNAME/../completions/squish.bash"
     local values="$1"; shift
     local v
     for v in $values; do
-      grep -q -- "$v" "$ZSH_COMP"  || { echo "zsh missing value: $v"  >&2; return 1; }
-      grep -q -- "$v" "$BASH_COMP" || { echo "bash missing value: $v" >&2; return 1; }
+      grep -qE -- "${v}([^a-z-]|$)" "$ZSH_COMP"  || { echo "zsh missing value: $v"  >&2; return 1; }
+      grep -qE -- "${v}([^a-z-]|$)" "$BASH_COMP" || { echo "bash missing value: $v" >&2; return 1; }
     done
   }
   check_values "slug optimized plain retina width"

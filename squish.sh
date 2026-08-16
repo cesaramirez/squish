@@ -9,7 +9,8 @@
 # Cross-platform: uses sips on macOS, ImageMagick elsewhere.
 #
 # Usage:
-#   ./squish.sh input.png [output.png]
+#   ./squish.sh input.png                          # optimize in place (writes input-min.png)
+#   ./squish.sh input.png --output out.png         # optimize to a specific path
 #   ./squish.sh input.png --width 400              # resize to 400px wide, then compress
 #   ./squish.sh input.png --retina --display 200   # 2x of a 200px display size -> 400px
 #   ./squish.sh input.png --webp                   # also write input.optimized.webp

@@ -55,6 +55,17 @@ test coverage. This is where real bugs hide (C1/C2 in v0.5.1 lived here).
 - [ ] **Batch (B): coherent cross-image naming** — let the AI see the whole set at
       once so names are consistent across a batch, not per-file.
 
+## DX — shell completions (requested)
+
+- [ ] **Tab completion for zsh + bash.** `squish --<TAB>` lists flags;
+      `squish --name-as <TAB>` → slug/plain/retina/width; `--context <TAB>` →
+      the context values; bare `<TAB>` → image files. Two scripts (zsh
+      `compdef`/`_arguments`, bash `complete`/`compgen`) under a new
+      `completions/` dir, installed via the Homebrew formula
+      (`zsh_completion.install` / `bash_completion.install`) and documented for
+      manual install. zsh first (the maintainer's shell + macOS default).
+      Worth its own brainstorm→spec→plan cycle — it's not a one-liner.
+
 ---
 
 Last updated after the v0.5.1 audit. See CHANGELOG.md for shipped work.
